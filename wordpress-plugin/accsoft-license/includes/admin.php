@@ -28,7 +28,7 @@ function accsoft_admin_page() {
     if (!current_user_can('manage_options')) return;
     global $wpdb;
     $tab = sanitize_key($_GET['tab'] ?? 'home');
-    $tabs = ['home' => 'نمای کلی', 'products' => 'محصولات و پلن‌ها', 'licenses' => 'لایسنس‌ها', 'orders' => 'سفارش‌ها', 'settings' => 'تنظیمات و کلید'];
+    $tabs = ['home' => 'نمای کلی', 'products' => 'محصولات و پلن‌ها', 'licenses' => 'لایسنس‌ها', 'orders' => 'سفارش‌ها', 'legacy' => 'افزونه‌های وردپرسی (webakery)', 'settings' => 'تنظیمات و کلید'];
     echo '<div class="wrap" dir="rtl"><h1>لایسنس نرم‌افزارها</h1><h2 class="nav-tab-wrapper">';
     foreach ($tabs as $k => $t) echo '<a class="nav-tab' . ($tab === $k ? ' nav-tab-active' : '') . '" href="' . esc_url(admin_url('admin.php?page=accsoft&tab=' . $k)) . '">' . esc_html($t) . '</a>';
     echo '</h2>';
@@ -102,6 +102,8 @@ function accsoft_admin_page() {
           <td>' . number_format_i18n($o['amount']) . '</td><td>' . esc_html($o['status']) . '</td><td>' . esc_html($o['track_id'] . ($o['ref_number'] ? ' / ' . $o['ref_number'] : '')) . '</td><td>' . esc_html($o['created']) . '</td></tr>';
         echo '</table>';
     }
+
+    if ($tab === 'legacy') accsoft_wl_admin_page(sanitize_key($_GET['sub'] ?? 'lic'));
 
     if ($tab === 'settings') {
         $pub = accsoft_pubkey_hex();

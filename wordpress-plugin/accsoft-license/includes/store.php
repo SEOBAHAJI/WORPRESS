@@ -18,6 +18,7 @@ function accsoft_install_tables() {
       status VARCHAR(10) NOT NULL DEFAULT 'pending', track_id VARCHAR(40) NOT NULL DEFAULT '', ref_number VARCHAR(40) NOT NULL DEFAULT '',
       renew_of BIGINT UNSIGNED NOT NULL DEFAULT 0, license_id BIGINT UNSIGNED NOT NULL DEFAULT 0, created DATETIME NOT NULL, paid_at DATETIME NULL,
       PRIMARY KEY (id), UNIQUE KEY code (code), KEY track_id (track_id), KEY user_id (user_id)) $cs;");
+    accsoft_wl_install_tables();
     update_option('accsoft_db_ver', ACCSOFT_VER);
 }
 

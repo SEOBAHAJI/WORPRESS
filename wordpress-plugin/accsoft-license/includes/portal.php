@@ -57,7 +57,8 @@ add_shortcode('accsoft_dashboard', function () {
         }
         echo '</div>';
     }
-    echo '</div></div>';
+    echo accsoft_wl_portal_html($uid, $post);
+    echo '</div>';
     return ob_get_clean();
 });
 

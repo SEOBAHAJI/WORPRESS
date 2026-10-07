@@ -7,3 +7,4 @@ license_private.key
 *.db
 data/
 license_admin/
+wordpress-plugin/**/legacy-import.php
