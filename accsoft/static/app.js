@@ -66,23 +66,29 @@ function setupView() {
 }
 
 // ---------- چارچوب ----------
-const PAGES = { dashboard: ['داشبورد', pDashboard], pos: ['فروش حضوری', pPos], sales: ['فاکتورها', pSales],
-  products: ['محصولات', pProducts], inventory: ['انبار', pInventory], customers: ['مشتریان', pCustomers],
-  reports: ['گزارش‌ها', pReports], expenses: ['هزینه‌ها', pExpenses], woo: ['ووکامرس', pWoo],
-  settings: ['تنظیمات', pSettings], license: ['لایسنس', pLicense] };
+const PAGES = { dashboard: ['داشبورد', pDashboard, 'reports'], pos: ['فروش حضوری', pPos, 'sell'], sales: ['فاکتورها', pSales, 'sales_view'],
+  products: ['محصولات', pProducts, 'products_view'], inventory: ['انبار', pInventory, 'inventory'], customers: ['مشتریان', pCustomers, 'customers'],
+  purchases: ['خرید و تأمین‌کنندگان', pPurchases, 'purchases'], accounts: ['حساب‌ها (بدهکار/بستانکار)', pAccounts, 'finance'],
+  reports: ['گزارش‌ها', pReports, 'reports'], expenses: ['هزینه‌ها', pExpenses, 'finance'], woo: ['ووکامرس', pWoo, 'woo'],
+  users: ['کاربران', pUsers, 'users'], settings: ['تنظیمات', pSettings, 'settings'], license: ['لایسنس و افزونه‌ها', pLicense, 'settings'] };
+const can = p => S.user && S.user.perms.includes(p);
+const visiblePages = () => Object.entries(PAGES).filter(([, v]) => can(v[2]));
 function go(page) {
-  if (!PAGES[page]) page = 'dashboard';
+  const plug = page.startsWith('plugin:') ? S.plugins.find(p => p.id === page.slice(7) && p.menu) : null;
+  if (!plug && !(PAGES[page] && can(PAGES[page][2]))) page = (visiblePages()[0] || ['license'])[0];
   location.hash = page;
-  const L = S.license, [title, fn] = PAGES[page];
+  const L = S.license, [title, fn] = plug ? [plug.menu.title, el => { el.innerHTML = ''; const f = document.createElement('iframe');
+    f.src = `/plugin/${plug.id}/${plug.menu.page}`; f.style.cssText = 'width:100%;height:78vh;border:0;background:#fff'; el.append(f); }] : PAGES[page];
   const banner = L.mode === 'trial' ? h`<div class="banner">دورهٔ آزمایشی: ${L.days_left} روز باقی مانده. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>`
     : L.mode === 'expired' ? h`<div class="banner bad">${L.tampered ? 'ساعت سیستم دستکاری شده است.' : (L.license_error || 'لایسنس معتبر نیست.')} فقط مشاهده و خروجی فعال است. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>` : '';
+  const menu = [...visiblePages().map(([k, [t]]) => [k, t]), ...S.plugins.filter(p => p.menu).map(p => ['plugin:' + p.id, p.menu.title])];
   $('#app').innerHTML = h`<div class="layout"><nav class="side"><h1>${S.shop_name || 'حسابداری'}</h1>
-    ${Object.entries(PAGES).map(([k, [t]]) => h`<a data-p="${k}" class="${k === page ? 'on' : ''}">${t}</a>`)}
-    <a id="out">خروج</a></nav><main class="main">${banner}<div class="top"><h2>${title}</h2>
-    <button class="sec" id="hlp">؟ راهنما</button></div><div id="page"></div></main></div>`.s;
+    ${menu.map(([k, t]) => h`<a data-p="${k}" class="${k === page ? 'on' : ''}">${t}</a>`)}
+    <a id="out">خروج (${S.user.username})</a></nav><main class="main">${banner}<div class="top"><h2>${title}</h2>
+    ${HELP[page] ? h`<button class="sec" id="hlp">؟ راهنما</button>` : ''}</div><div id="page"></div></main></div>`.s;
   document.querySelectorAll('.side a[data-p]').forEach(a => a.onclick = () => go(a.dataset.p));
   $('#out').onclick = async () => { await api('POST', '/api/logout', {}); boot(); };
-  $('#hlp').onclick = () => showHelp(page);
+  if (HELP[page]) $('#hlp').onclick = () => showHelp(page);
   run(() => fn($('#page')));
 }
 const render = (el, t) => { el.innerHTML = t.s; };
@@ -96,18 +102,21 @@ async function pDashboard(el) {
   render(el, h`<div class="grid">${card('امروز', d.day)}${card('این هفته', d.week)}${card('این ماه', d.month)}</div>
     <div class="grid"><div class="card stat"><small>محصولات</small><b>${d.products}</b></div>
     <div class="card stat"><small>مشتریان</small><b>${d.customers}</b></div>
-    <div class="card stat"><small>کمبود موجودی</small><b class="${d.low_stock ? 'neg' : ''}">${d.low_stock}</b></div></div>`);
+    <div class="card stat"><small>کمبود موجودی</small><b class="${d.low_stock ? 'neg' : ''}">${d.low_stock}</b></div>
+    <div class="card stat"><small>مطالبات از مشتریان</small><b>${money(d.receivable)}</b></div>
+    <div class="card stat"><small>بدهی به تأمین‌کنندگان</small><b class="${d.payable ? 'neg' : ''}">${money(d.payable)}</b></div></div>`);
 }
 
 // ---------- فروش حضوری ----------
 let cart = [];
 async function pPos(el) {
-  const products = await api('GET', '/api/products');
+  const products = await api('GET', '/api/products?sellable=1');
   render(el, h`<div class="pos"><div class="card"><input id="q" placeholder="جست‌وجوی نام یا کد..." style="width:100%" autofocus>
     <div class="plist" id="pl"></div></div>
     <div class="card"><table id="ct"></table>
     <div class="row">${field('تخفیف (تومان)', h`<input id="disc" value="0" size="10">`)}
-      ${field('پرداخت', h`<select id="pm"><option value="cash">نقد</option><option value="card">کارت</option><option value="credit">اعتباری</option></select>`)}</div>
+      ${field('پرداخت', h`<select id="pm"><option value="cash">نقد</option><option value="card">کارت</option><option value="credit">اعتباری (نسیه)</option></select>`)}
+      ${field('پیش‌پرداخت (برای نسیه)', h`<input id="paid" value="0" size="10">`)}</div>
     <div class="row">${field('موبایل مشتری', h`<input id="cph" placeholder="09..." size="12">`)}${field('نام', h`<input id="cfn" size="9">`)}${field('نام خانوادگی', h`<input id="cln" size="11">`)}</div>
     <h3>مبلغ نهایی: <span id="tot"></span> تومان</h3>
     <button class="ok" id="sell">ثبت و چاپ</button> <button class="sec" id="clr">خالی کردن</button></div></div>`);
@@ -136,7 +145,7 @@ async function pPos(el) {
   $('#sell').onclick = () => run(async () => {
     const phone = $('#cph').value.trim();
     const r = await api('POST', '/api/sales', { items: cart.map(({ product_id, qty, unit_price }) => ({ product_id, qty, unit_price })),
-      discount: parseInt(faNum($('#disc').value)) || 0, pay_method: $('#pm').value,
+      discount: parseInt(faNum($('#disc').value)) || 0, pay_method: $('#pm').value, paid: parseInt(faNum($('#paid').value)) || 0,
       customer: phone ? { phone, first_name: $('#cfn').value, last_name: $('#cln').value } : null });
     cart = []; toast(`فاکتور ${r.number} ثبت شد`); showPrint(`/print/invoice/${r.id}`); pPos(el);
   });
@@ -173,10 +182,10 @@ async function pProducts(el) {
     const rows = await api('GET', '/api/products?q=' + encodeURIComponent($('#q').value));
     $('#t').innerHTML = h`<table><tr><th><input type="checkbox" id="all"></th><th></th><th>نام</th><th>کد</th><th>قیمت (تومان)</th><th>خرید</th><th>موجودی</th><th></th></tr>
       ${rows.map(p => h`<tr><td><input type="checkbox" data-s="${p.id}" ${sel.has(p.id) ? raw('checked') : ''}></td>
-      <td><img class="thumb" data-img="${p.id}" style="cursor:pointer" ${p.image ? raw(`src="/img/${esc(p.image)}"`) : ''} title="تغییر تصویر"></td>
-      <td>${p.name}${p.woo_id ? h` <span class="badge on">سایت</span>` : ''}</td><td>${p.sku}</td>
-      <td>${money(p.price_toman)}${p.currency === 'USD' ? h` <small class="mut">($${p.price})</small>` : ''}</td><td>${money(p.cost_toman)}</td>
-      <td class="${p.stock <= p.min_stock ? 'neg' : ''}">${p.stock}</td><td><button class="sec" data-e="${p.id}">ویرایش</button> <button class="bad" data-x="${p.id}">حذف</button></td></tr>`)}</table>`.s;
+      <td>${p.kind === 'variable' ? '' : h`<img class="thumb" data-img="${p.id}" style="cursor:pointer" ${p.image ? raw(`src="/img/${esc(p.image)}"`) : ''} title="تغییر تصویر">`}</td>
+      <td style="${p.kind === 'variation' ? 'padding-right:26px' : ''}">${p.kind === 'variation' ? '↳ ' : ''}${p.name}${p.woo_id ? h` <span class="badge on">سایت</span>` : ''}${p.kind === 'variable' ? h` <span class="badge off">متغیر</span>` : ''}</td><td>${p.sku}</td>
+      <td>${p.kind === 'variable' ? '' : money(p.price_toman)}${p.currency === 'USD' && p.kind !== 'variable' ? h` <small class="mut">($${p.price})</small>` : ''}</td><td>${p.kind === 'variable' ? '' : money(p.cost_toman)}</td>
+      <td class="${p.stock <= p.min_stock && p.kind !== 'variable' ? 'neg' : ''}">${p.kind === 'variable' ? '—' : p.stock}</td><td><button class="sec" data-e="${p.id}">ویرایش</button> <button class="bad" data-x="${p.id}">حذف</button></td></tr>`)}</table>`.s;
     const byId = id => rows.find(p => p.id == id);
     $('#all').onchange = e => { rows.forEach(p => e.target.checked ? sel.add(p.id) : sel.delete(p.id)); load(); };
     $('#t').querySelectorAll('[data-s]').forEach(c => c.onchange = () => c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s));
@@ -225,7 +234,7 @@ function bulkPrice(ids, done) {
 
 // ---------- انبار ----------
 async function pInventory(el) {
-  const [rows, moves] = await Promise.all([api('GET', '/api/products'), api('GET', '/api/stock-moves')]);
+  const [rows, moves] = await Promise.all([api('GET', '/api/products?sellable=1'), api('GET', '/api/stock-moves')]);
   const REASON = { sale: 'فروش', return: 'برگشت', adjust: 'اصلاح', purchase: 'خرید/ورود', initial: 'اولیه', woo_sync: 'همگام‌سازی سایت' };
   render(el, h`<div class="card"><table><tr><th>کالا</th><th>موجودی</th><th>حداقل</th><th>تغییر موجودی</th></tr>
     ${rows.map(p => h`<tr><td>${p.name}</td><td class="${p.stock <= p.min_stock ? 'neg' : ''}">${p.stock}</td><td>${p.min_stock}</td>
@@ -243,8 +252,8 @@ async function pCustomers(el) {
   render(el, h`<div class="card"><div class="row"><input id="q" class="grow" placeholder="جست‌وجو (نام/موبایل)"><button id="add">+ مشتری</button><a class="btn sec" href="/export/customers.xlsx">Excel</a></div><div id="t"></div></div>`);
   const load = () => run(async () => {
     const rows = await api('GET', '/api/customers?q=' + encodeURIComponent($('#q').value));
-    $('#t').innerHTML = h`<table><tr><th>نام</th><th>موبایل</th><th>تعداد خرید</th><th>جمع خرید</th><th>خوش‌آمد</th></tr>
-      ${rows.map(c => h`<tr><td>${c.first_name} ${c.last_name}</td><td dir="ltr">${c.phone}</td><td>${c.orders}</td><td>${money(c.spent)}</td><td>${c.welcomed ? '✓' : ''}</td></tr>`)}</table>`.s;
+    $('#t').innerHTML = h`<table><tr><th>نام</th><th>موبایل</th><th>تعداد خرید</th><th>جمع خرید</th><th>مانده بدهی</th><th>خوش‌آمد</th></tr>
+      ${rows.map(c => h`<tr><td>${c.first_name} ${c.last_name}</td><td dir="ltr">${c.phone}</td><td>${c.orders}</td><td>${money(c.spent)}</td><td class="${c.balance > 0 ? 'neg' : ''}">${money(c.balance)}</td><td>${c.welcomed ? '✓' : ''}</td></tr>`)}</table>`.s;
   });
   $('#q').oninput = load; load();
   $('#add').onclick = () => { const m = modal(h`<h3>مشتری جدید</h3><div class="row">${field('موبایل', h`<input id="p" placeholder="09...">`)}${field('نام', h`<input id="f">`)}${field('نام خانوادگی', h`<input id="l">`)}</div>
@@ -288,12 +297,13 @@ async function pExpenses(el) {
 }
 
 // ---------- ووکامرس ----------
+const WOO_LBL = { added: 'جدید', updated: 'به‌روز شد', variations: 'تنوع', created: 'ساخته شد', images: 'تصویر ارسال شد', images_failed: 'تصویر ناموفق', errors: 'خطاها', imported: 'سفارش وارد شد' };
 async function pWoo(el) {
   render(el, h`<div class="card"><p>ابتدا آدرس و کلیدهای API را در <a href="#settings">تنظیمات</a> وارد کنید.</p>
     <div class="row"><button id="p1">⬇ دریافت محصولات از سایت</button><label><input type="checkbox" id="us"> موجودی هم از سایت بیاید</label></div><br>
     <div class="row"><button id="p2">⬆ ارسال تغییرات (قیمت/موجودی/محصول جدید) به سایت</button><label><input type="checkbox" id="all"> همهٔ محصولات</label></div><br>
     <button id="p3">⬇ دریافت سفارش‌های آنلاین</button></div><div class="card" id="out" class="mut"></div>`);
-  const act = (id, fn) => $(id).onclick = () => run(async () => { $('#out').textContent = 'در حال انجام...'; const r = await fn(); $('#out').textContent = JSON.stringify(r); toast('انجام شد'); });
+  const act = (id, fn) => $(id).onclick = () => run(async () => { $('#out').textContent = 'در حال انجام...'; const r = await fn(); $('#out').innerHTML = h`<b>نتیجه:</b> ${Object.entries(r).filter(([, v]) => !Array.isArray(v) || v.length).map(([k, v]) => `${WOO_LBL[k] || k}: ${Array.isArray(v) ? v.join(' | ') : v}`).join('  ·  ')}`.s; toast('انجام شد'); });
   act('#p1', () => api('POST', '/api/woo/pull-products', { update_stock: $('#us').checked }));
   act('#p2', () => api('POST', '/api/woo/push-products', { all: $('#all').checked }));
   act('#p3', () => api('POST', '/api/woo/pull-orders', {}));
@@ -308,7 +318,8 @@ async function pSettings(el) {
   render(el, h`<div class="card"><h3>فروشگاه و ارز</h3><div class="grid">${inp('shop_name', 'نام فروشگاه')}${inp('shop_phone', 'تلفن')}${inp('shop_address', 'آدرس')}
     ${inp('invoice_footer', 'متن پایین فاکتور')}${inp('usd_rate', 'نرخ دلار (تومان)')}</div>${sw('allow_negative_stock', 'اجازهٔ فروش با موجودی صفر')}</div>
     <div class="card"><h3>ووکامرس</h3><div class="grid">${inp('woo_url', 'آدرس سایت (https://...)')}${inp('woo_key', 'Consumer Key', 'type="password" autocomplete="off"')}
-    ${inp('woo_secret', 'Consumer Secret', 'type="password" autocomplete="off"')}${sel('woo_unit', 'واحد قیمت سایت', [['toman', 'تومان'], ['rial', 'ریال']])}</div>
+    ${inp('woo_secret', 'Consumer Secret', 'type="password" autocomplete="off"')}${sel('woo_unit', 'واحد قیمت سایت', [['toman', 'تومان'], ['rial', 'ریال']])}
+    ${inp('wp_user', 'نام کاربری وردپرس (برای ارسال تصویر)')}${inp('wp_app_password', 'رمز برنامهٔ وردپرس (Application Password)', 'type="password" autocomplete="off"')}</div>
     ${sw('woo_orders_decrement', 'با دریافت سفارش آنلاین، موجودی برنامه کم شود')}</div>
     <div class="card"><h3>پیامک خوش‌آمدگویی</h3>${sw('welcome_enabled', 'ارسال پیام به مشتری جدید')}<div class="grid">
     ${sel('sms_provider', 'پنل', [['none', 'غیرفعال'], ['kavenegar', 'کاوه‌نگار'], ['custom', 'سفارشی (URL)']])}${inp('sms_apikey', 'کلید API', 'type="password" autocomplete="off"')}${inp('sms_sender', 'شمارهٔ فرستنده')}
@@ -325,21 +336,108 @@ async function pSettings(el) {
   $('#pc').onclick = () => run(() => api('POST', '/api/password', { old: $('#po').value, new: $('#pn').value }), 'رمز تغییر کرد');
 }
 
-// ---------- لایسنس ----------
-async function pLicense(el) {
-  S = await (await fetch('/api/state')).json(); csrf = S.csrf; const L = S.license;
-  const cur = L.mode === 'licensed' ? h`<div class="banner" style="background:#dcfce7;color:#166534">لایسنس فعال: ${L.plans[L.plan].title} — ${L.expires ? 'تا ' + L.expires : 'بدون انقضا'}</div>` : '';
-  render(el, h`${cur}<div class="card"><p>شناسهٔ دستگاه شما: <b dir="ltr">${L.machine_id}</b></p>
-    <div class="plans">${Object.entries(L.plans).map(([k, p]) => h`<div class="plan"><div>${p.title}</div><b>${money(p.price)}</b><small class="mut">تومان</small><br><br>
-    <button data-buy="${k}">پرداخت در وبیکری</button></div>`)}</div></div>
-    <div class="card"><h3>فعال‌سازی</h3>${field('کد لایسنس', h`<textarea id="k" rows="3" style="width:100%" dir="ltr"></textarea>`)}<button id="act">فعال‌سازی</button>
-    <hr><div class="row">${field('یا کد سفارش وبیکری', h`<input id="od" dir="ltr">`)}<button class="sec" id="ord">دریافت خودکار لایسنس</button></div></div>`);
-  el.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => run(async () => {
-    const r = await api('GET', '/api/license/buy-url?plan=' + b.dataset.buy); window.open(r.url, '_blank', 'noopener');
+// ---------- خرید و تأمین‌کنندگان ----------
+let pcart = [];
+async function pPurchases(el) {
+  const [sups, products, list] = await Promise.all([api('GET', '/api/suppliers'), api('GET', '/api/products?sellable=1'), api('GET', '/api/purchases')]);
+  render(el, h`<div class="card"><h3>تأمین‌کنندگان</h3><div class="row">${field('نام', h`<input id="sn">`)}${field('تلفن', h`<input id="sp">`)}<button id="sa">+ افزودن</button></div>
+    <table><tr><th>نام</th><th>تلفن</th><th>مانده بدهی ما</th><th></th></tr>${sups.map(x => h`<tr><td>${x.name}</td><td dir="ltr">${x.phone}</td>
+    <td class="${x.balance > 0 ? 'neg' : ''}">${money(x.balance)}</td><td><button class="bad" data-ds="${x.id}">حذف</button></td></tr>`)}</table></div>
+    <div class="card"><h3>فاکتور خرید جدید</h3><div class="row">${field('تأمین‌کننده', h`<select id="sup">${sups.map(x => h`<option value="${x.id}">${x.name}</option>`)}</select>`)}
+    ${field('افزودن کالا', h`<select id="pp"><option value="">— انتخاب —</option>${products.map(x => h`<option value="${x.id}">${x.name} (موجودی ${x.stock})</option>`)}</select>`)}</div>
+    <table id="pc"></table><div class="row">${field('پرداخت‌شده الان (تومان)', h`<input id="pd" value="0" size="12">`)}${field('یادداشت', h`<input id="pn">`)}</div>
+    <h3>جمع: <span id="pt"></span> تومان</h3><button class="ok" id="pok">ثبت فاکتور خرید</button></div>
+    <div class="card"><h3>فاکتورهای خرید</h3><table><tr><th>شماره</th><th>تاریخ</th><th>تأمین‌کننده</th><th>جمع</th><th>پرداخت‌شده</th><th></th></tr>
+    ${list.map(x => h`<tr><td>${x.number}</td><td>${x.jdate}</td><td>${x.supplier}</td><td>${money(x.total)}</td><td>${money(x.paid)}</td>
+    <td><button class="sec" data-pp="${x.id}">چاپ</button> <button class="bad" data-dp="${x.id}">ابطال</button></td></tr>`)}</table></div>`);
+  const draw = () => {
+    $('#pc').innerHTML = '<tr><th>کالا</th><th>تعداد</th><th>قیمت خرید (تومان)</th><th></th></tr>' + pcart.map((c, i) => h`<tr><td>${c.name}</td>
+      <td><input type="number" min="1" value="${c.qty}" data-i="${i}" data-f="qty" style="width:70px"></td>
+      <td><input value="${c.unit_cost}" data-i="${i}" data-f="unit_cost" style="width:110px"></td><td><button class="sec" data-del="${i}">✕</button></td></tr>`.s).join('');
+    $('#pc').querySelectorAll('input').forEach(i => i.onchange = () => { pcart[i.dataset.i][i.dataset.f] = parseInt(faNum(i.value)) || 0; draw(); });
+    $('#pc').querySelectorAll('[data-del]').forEach(b => b.onclick = () => { pcart.splice(b.dataset.del, 1); draw(); });
+    $('#pt').textContent = money(pcart.reduce((a, c) => a + c.qty * c.unit_cost, 0));
+  };
+  draw();
+  $('#pp').onchange = () => { const p = products.find(x => x.id == $('#pp').value); if (p) { pcart.push({ product_id: p.id, name: p.name, qty: 1, unit_cost: p.cost_toman }); draw(); } $('#pp').value = ''; };
+  $('#sa').onclick = () => run(async () => { await api('POST', '/api/suppliers', { name: $('#sn').value, phone: $('#sp').value }); pPurchases(el); }, 'ثبت شد');
+  el.querySelectorAll('[data-ds]').forEach(b => b.onclick = () => confirm('حذف شود؟') && run(async () => { await api('DELETE', '/api/suppliers/' + b.dataset.ds); pPurchases(el); }));
+  $('#pok').onclick = () => run(async () => {
+    const r = await api('POST', '/api/purchases', { supplier_id: $('#sup').value, items: pcart.map(({ product_id, qty, unit_cost }) => ({ product_id, qty, unit_cost })),
+      paid: parseInt(faNum($('#pd').value)) || 0, note: $('#pn').value });
+    pcart = []; toast(`فاکتور خرید ${r.number} ثبت شد`); pPurchases(el);
+  });
+  el.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => showPrint('/print/purchase/' + b.dataset.pp));
+  el.querySelectorAll('[data-dp]').forEach(b => b.onclick = () => confirm('فاکتور خرید باطل و موجودی کم شود؟') && run(async () => { await api('DELETE', '/api/purchases/' + b.dataset.dp); pPurchases(el); }));
+}
+
+// ---------- حساب‌ها ----------
+async function pAccounts(el) {
+  const d = await api('GET', '/api/parties');
+  const tbl = (title, rows, type, cls) => h`<div class="card"><h3>${title}: <span class="${cls}">${money(d[type === 'customer' ? 'debtors' : 'creditors'].total)}</span> تومان</h3>
+    <table><tr><th>نام</th><th>موبایل/تلفن</th><th>مانده</th><th></th></tr>${rows.map(x => h`<tr><td>${x.name || [x.first_name, x.last_name].join(' ')}</td><td dir="ltr">${x.phone}</td>
+    <td class="${cls}">${money(x.balance)}</td><td><button data-pay="${type}|${x.id}|${x.balance}">${type === 'customer' ? 'ثبت دریافت' : 'ثبت پرداخت'}</button>
+    <button class="sec" data-led="${type}|${x.id}">صورت‌حساب</button></td></tr>`)}</table></div>`;
+  render(el, h`${tbl('بدهکاران (مشتریانی که باید بپردازند)', d.debtors.rows, 'customer', 'neg')}${tbl('بستانکاران (تأمین‌کنندگانی که باید به آن‌ها بپردازیم)', d.creditors.rows, 'supplier', 'neg')}`);
+  el.querySelectorAll('[data-pay]').forEach(b => b.onclick = () => {
+    const [t, id, bal] = b.dataset.pay.split('|');
+    const m = modal(h`<h3>${t === 'customer' ? 'ثبت دریافت از مشتری' : 'ثبت پرداخت به تأمین‌کننده'}</h3><p class="mut">مانده: ${money(bal)} تومان</p>
+      <div class="row">${field('مبلغ', h`<input id="am" value="${bal}">`)}${field('روش', h`<select id="me"><option value="cash">نقد</option><option value="card">کارت</option><option value="transfer">واریز</option></select>`)}${field('یادداشت', h`<input id="no">`)}</div>
+      <p><button id="ok">ثبت</button> <button class="sec" data-close>انصراف</button></p>`);
+    $('#ok', m.box).onclick = () => run(async () => { await api('POST', '/api/payments', { party_type: t, party_id: id, amount: faNum($('#am', m.box).value), method: $('#me', m.box).value, note: $('#no', m.box).value }); m.close(); pAccounts(el); }, 'ثبت شد');
+  });
+  el.querySelectorAll('[data-led]').forEach(b => b.onclick = () => run(async () => {
+    const [t, id] = b.dataset.led.split('|'); const rows = await api('GET', `/api/ledger?party_type=${t}&party_id=${id}`);
+    const m = modal(h`<h3>صورت‌حساب</h3><table><tr><th>تاریخ</th><th>شرح</th><th>بدهکار</th><th>پرداخت</th><th>مانده</th><th></th></tr>
+      ${rows.map(r => h`<tr><td>${r.date}</td><td>${r.title}</td><td>${r.debit ? money(r.debit) : ''}</td><td>${r.credit ? money(r.credit) : ''}</td><td>${money(r.balance)}</td>
+      <td>${r.payment_id ? h`<button class="bad" data-dpay="${r.payment_id}">حذف</button>` : ''}</td></tr>`)}</table><p><button data-close>بستن</button></p>`);
+    m.box.querySelectorAll('[data-dpay]').forEach(x => x.onclick = () => confirm('این پرداخت حذف شود؟') && run(async () => { await api('DELETE', '/api/payments/' + x.dataset.dpay); m.close(); pAccounts(el); }));
   }));
-  const done = async () => { S = await (await fetch('/api/state')).json(); go('license'); };
+}
+
+// ---------- کاربران ----------
+async function pUsers(el) {
+  const [users, audit] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/audit')]);
+  const roleSel = (id, cur) => h`<select data-role="${id}">${Object.entries(S.roles).map(([k, t]) => h`<option value="${k}" ${k === cur ? raw('selected') : ''}>${t}</option>`)}</select>`;
+  render(el, h`<div class="card"><h3>کاربر جدید</h3><div class="row">${field('نام کاربری', h`<input id="nu" autocomplete="off">`)}${field('نام نمایشی', h`<input id="nf">`)}
+    ${field('رمز (حداقل ۸)', h`<input id="np" type="password" autocomplete="new-password">`)}${field('نقش', h`<select id="nr">${Object.entries(S.roles).map(([k, t]) => h`<option value="${k}" ${k === 'cashier' ? raw('selected') : ''}>${t}</option>`)}</select>`)}
+    <button id="na">افزودن</button></div></div>
+    <div class="card"><table><tr><th>کاربر</th><th>نقش</th><th>وضعیت</th><th></th></tr>${users.map(u => h`<tr><td>${u.username} <small class="mut">${u.full_name}</small></td><td>${roleSel(u.id, u.role)}</td>
+    <td>${u.active ? h`<span class="badge on">فعال</span>` : h`<span class="badge off">غیرفعال</span>`}</td><td><button class="sec" data-tg="${u.id}|${u.active ? 0 : 1}">${u.active ? 'غیرفعال' : 'فعال'}</button>
+    <button class="sec" data-pw="${u.id}">رمز جدید</button> <button class="bad" data-du="${u.id}">حذف</button></td></tr>`)}</table>
+    <details><summary>دسترسی هر نقش</summary><table>${Object.entries(S.roles).map(([k, t]) => h`<tr><td><b>${t}</b></td><td class="mut">${(S.role_perms[k] || []).join('، ')}</td></tr>`)}</table></details></div>
+    <div class="card"><h3>گزارش رویدادها (۲۰۰ مورد آخر)</h3><table><tr><th>زمان</th><th>کاربر</th><th>رویداد</th><th>جزئیات</th></tr>${audit.map(a => h`<tr><td dir="ltr">${a.created_at}</td><td>${a.username || ''}</td><td>${a.action}</td><td>${a.detail}</td></tr>`)}</table></div>`);
+  $('#na').onclick = () => run(async () => { await api('POST', '/api/users', { username: $('#nu').value, full_name: $('#nf').value, password: $('#np').value, role: $('#nr').value }); pUsers(el); }, 'کاربر ساخته شد');
+  el.querySelectorAll('[data-role]').forEach(x => x.onchange = () => run(async () => { await api('PUT', '/api/users/' + x.dataset.role, { role: x.value }); pUsers(el); }, 'ذخیره شد'));
+  el.querySelectorAll('[data-tg]').forEach(b => b.onclick = () => { const [id, a] = b.dataset.tg.split('|'); run(async () => { await api('PUT', '/api/users/' + id, { active: a === '1' }); pUsers(el); }); });
+  el.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => { const pw = prompt('رمز جدید (حداقل ۸ نویسه):'); if (pw) run(async () => { await api('PUT', '/api/users/' + b.dataset.pw, { password: pw }); }, 'رمز تغییر کرد'); });
+  el.querySelectorAll('[data-du]').forEach(b => b.onclick = () => confirm('کاربر حذف شود؟') && run(async () => { await api('DELETE', '/api/users/' + b.dataset.du); pUsers(el); }));
+}
+
+// ---------- لایسنس و افزونه‌ها ----------
+async function pLicense(el) {
+  S = { ...S, ...(await (await fetch('/api/state')).json()) }; csrf = S.csrf; const L = S.license;
+  const cat = await api('GET', '/api/license/catalog');
+  const cur = L.mode === 'licensed' ? h`<div class="banner" style="background:#dcfce7;color:#166534">لایسنس برنامه فعال: ${L.plans[L.plan]?.title || L.plan} — ${L.expires ? 'تا ' + L.expires : 'بدون انقضا'}</div>` : '';
+  const pname = id => cat.products.find(p => p.id === id)?.name || id;
+  render(el, h`${cur}<div class="card"><p>شناسهٔ دستگاه شما: <b dir="ltr">${L.machine_id}</b> <small class="mut">(هنگام خرید به فروشنده بدهید تا لایسنس به این سیستم وصل شود)</small></p>
+    <h3>لایسنس‌های نصب‌شده</h3><table><tr><th>محصول</th><th>پلن</th><th>انقضا</th><th>وضعیت</th></tr>${cat.installed.length ? cat.installed.map(i => h`<tr><td>${pname(i.product)}</td><td>${i.plan || ''}</td><td>${i.expires || 'بدون انقضا'}</td>
+    <td>${i.error ? h`<span class="neg">${i.error}</span>` : h`<span class="pos-n">معتبر</span>`}</td></tr>`) : h`<tr><td colspan="4" class="mut">هنوز لایسنسی نصب نشده</td></tr>`}</table></div>
+    ${cat.products.map(p => h`<div class="card"><h3>${p.name} <span class="badge">${p.kind === 'app' ? 'برنامه' : 'افزونه'}</span></h3><p class="mut">${p.description}</p>
+    <div class="plans">${p.plans.map(x => h`<div class="plan"><div>${x.title}</div><b>${money(x.price)}</b><small class="mut">تومان</small><br><br>
+    <button data-buy="${p.id}|${x.id}">پرداخت در وبیکری</button></div>`)}</div></div>`)}
+    <div class="card"><h3>فعال‌سازی</h3>${field('کد لایسنس', h`<textarea id="k" rows="3" style="width:100%" dir="ltr"></textarea>`)}<button id="act">فعال‌سازی</button>
+    <hr><div class="row">${field('یا کد سفارش وبیکری', h`<input id="od" dir="ltr">`)}<button class="sec" id="ord">دریافت خودکار لایسنس</button>
+    <button class="sec" id="rc">به‌روزرسانی کاتالوگ محصولات (اینترنت)</button></div><p class="mut">نسخهٔ کاتالوگ: ${cat.version}</p></div>
+    <div class="card"><h3>افزونه‌های نصب‌شده</h3>${S.plugins.length ? h`<table><tr><th>نام</th><th>نسخه</th><th>وضعیت</th></tr>${S.plugins.map(p => h`<tr><td>${p.name}</td><td>${p.version}</td>
+    <td>${p.error ? h`<span class="neg">${p.error}</span>` : p.loaded ? 'فعال' : p.licensed ? 'نیاز به راه‌اندازی مجدد برنامه' : 'نیاز به لایسنس: ' + pname(p.product)}</td></tr>`)}</table>` : h`<p class="mut">افزونه‌ای نصب نشده. پوشهٔ افزونه را در plugins داخل پوشهٔ داده کپی کنید.</p>`}</div>`);
+  el.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => run(async () => {
+    const [pr, pl] = b.dataset.buy.split('|'); const r = await api('GET', `/api/license/buy-url?product=${encodeURIComponent(pr)}&plan=${encodeURIComponent(pl)}`); window.open(r.url, '_blank', 'noopener');
+  }));
+  const done = async () => { S = { ...S, ...(await (await fetch('/api/state')).json()) }; go('license'); };
   $('#act').onclick = () => run(async () => { await api('POST', '/api/license', { key: $('#k').value }); await done(); }, 'لایسنس فعال شد');
   $('#ord').onclick = () => run(async () => { await api('POST', '/api/license/order', { order: $('#od').value }); await done(); }, 'لایسنس فعال شد');
+  $('#rc').onclick = () => run(async () => { await api('POST', '/api/license/catalog-refresh', {}); await done(); }, 'کاتالوگ به‌روز شد');
 }
 
 boot();

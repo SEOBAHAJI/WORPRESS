@@ -1,5 +1,6 @@
 """تأیید امضای Ed25519 (RFC 8032) به‌صورت پایتون خالص؛ برای لایسنس آفلاین.
 امضاکردن فقط در tools/license_tool.py استفاده می‌شود و در برنامهٔ نهایی کلید خصوصی وجود ندارد."""
+import functools
 import hashlib
 
 _b = 256
@@ -92,7 +93,9 @@ def sign(msg: bytes, seed: bytes) -> bytes:
     return _enc(R) + S.to_bytes(32, "little")
 
 
+@functools.lru_cache(maxsize=256)
 def verify(sig: bytes, msg: bytes, pk: bytes) -> bool:
+    """نتیجه کش می‌شود (ورودی‌ها immutable‌اند): تأیید پایتون خالص گران است و به‌ازای هر درخواست تکرار می‌شد."""
     try:
         if len(sig) != 64 or len(pk) != 32:
             return False

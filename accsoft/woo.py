@@ -51,6 +51,25 @@ class Woo:
                 return out
             page += 1
 
+    def wp_media(self, filename, blob, mime):
+        """آپلود تصویر در کتابخانهٔ رسانهٔ وردپرس (نیازمند نام کاربری + «رمز برنامه»؛ کلید ووکامرس این دسترسی را ندارد)."""
+        user = self.db.get("wp_user", "")
+        pw = security.unseal(self.db.get("wp_app_password", ""))
+        if not (user and pw):
+            raise AppError("برای ارسال تصویر، نام کاربری و «رمز برنامه» وردپرس را در تنظیمات وارد کنید")
+        url = self.base.split("/wc/v3")[0] + "/wp/v2/media"
+        auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        req = urllib.request.Request(url, data=blob, method="POST", headers={
+            "Authorization": f"Basic {auth}", "Content-Type": mime,
+            "Content-Disposition": f'attachment; filename="{filename}"'})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read())["id"]
+        except urllib.error.HTTPError as e:
+            raise AppError(f"آپلود تصویر ناموفق ({e.code}): {e.read(200).decode('utf-8', 'replace')}")
+        except urllib.error.URLError as e:
+            raise AppError(f"اتصال به سایت ممکن نشد: {e.reason}")
+
     def price_out(self, toman):
         return str(int(toman) * (10 if self.rial else 1))
 
@@ -83,72 +102,131 @@ def save_image_bytes(blob: bytes) -> str:
     return name
 
 
+def _attrs_text(item):
+    return "، ".join(f"{a.get('name', '')}: {a.get('option', '')}" for a in item.get("attributes", []) if a.get("option"))
+
+
+def _upsert(db, w, wp, *, kind, parent_id, name, update_stock, images, img_src):
+    """یک محصول/تنوع سایت را به ردیف محلی نگاشت می‌کند. → 'added' | 'updated' (با شناسهٔ محلی)."""
+    price = w.price_in(wp.get("regular_price") or wp.get("price"))
+    stock = wp.get("stock_quantity") if wp.get("manage_stock") is True else None
+    cat = (wp.get("categories") or [{}])[0].get("name", "")
+    row = db.one("SELECT * FROM products WHERE woo_id=?", (wp["id"],)) or \
+        (db.one("SELECT * FROM products WHERE sku=? AND parent_id IS ?", (wp["sku"], parent_id)) if wp.get("sku") else None)
+    img = ""
+    if images and img_src and (not row or not row["image"]):
+        img = w.fetch_image(img_src)
+    attrs = _attrs_text(wp) if kind == "variation" else ""
+    with db.tx() as c:
+        if row:
+            sets, args = ["name=?", "woo_id=?", "woo_dirty=0", "kind=?", "parent_id=?", "attrs=?", "active=1"], \
+                [name, wp["id"], kind, parent_id, attrs]
+            if kind != "variation":
+                sets.append("category=?")
+                args.append(cat)
+            if kind != "variable" and row["currency"] == "IRT":
+                sets.append("price=?")
+                args.append(price)
+            if img:
+                sets.append("image=?")
+                args.append(img)
+            c.execute(f"UPDATE products SET {','.join(sets)} WHERE id=?", (*args, row["id"]))
+            if update_stock and stock is not None and stock != row["stock"] and kind != "variable":
+                services.adjust_stock(db, row["id"], stock - row["stock"], "woo_sync",
+                                      note="همگام‌سازی از سایت", conn=c, allow_negative=True)
+                c.execute("UPDATE products SET woo_dirty=0 WHERE id=?", (row["id"],))
+            return row["id"], "updated"
+        cur = c.execute("INSERT INTO products(name,sku,category,price,stock,image,woo_id,kind,parent_id,attrs) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (name, wp.get("sku") or None, cat, 0 if kind == "variable" else price,
+                         0 if kind == "variable" else max(stock or 0, 0), img, wp["id"], kind, parent_id, attrs))
+        if stock and kind != "variable":
+            c.execute("INSERT INTO stock_moves(product_id,qty,reason,note) VALUES(?,?,?,?)",
+                      (cur.lastrowid, stock, "woo_sync", "ورود اولیه از سایت"))
+        return cur.lastrowid, "added"
+
+
 def pull_products(db, update_stock=False, images=True, woo=None):
+    """محصولات ساده و متغیر (با تنوع‌ها) را از سایت می‌گیرد."""
     w = woo or Woo(db)
-    added = updated = 0
+    out = {"added": 0, "updated": 0, "variations": 0}
     for wp in w.paged("products", {"status": "publish"}):
-        if wp.get("type") not in ("simple", None):
-            continue  # محصولات متغیر فعلاً پشتیبانی نمی‌شوند
-        price = w.price_in(wp.get("regular_price") or wp.get("price"))
-        stock = wp.get("stock_quantity") if wp.get("manage_stock") else None
-        cat = (wp.get("categories") or [{}])[0].get("name", "")
-        row = db.one("SELECT * FROM products WHERE woo_id=?", (wp["id"],)) or \
-            (db.one("SELECT * FROM products WHERE sku=?", (wp["sku"],)) if wp.get("sku") else None)
-        img = ""
-        if images and wp.get("images") and (not row or not row["image"]):
-            img = w.fetch_image(wp["images"][0].get("src", ""))
-        with db.tx() as c:
-            if row:
-                sets, args = ["name=?", "category=?", "woo_id=?", "woo_dirty=0"], [wp["name"], cat, wp["id"]]
-                if row["currency"] == "IRT":
-                    sets.append("price=?")
-                    args.append(price)
-                if img:
-                    sets.append("image=?")
-                    args.append(img)
-                c.execute(f"UPDATE products SET {','.join(sets)} WHERE id=?", (*args, row["id"]))
-                if update_stock and stock is not None and stock != row["stock"]:
-                    services.adjust_stock(db, row["id"], stock - row["stock"], "woo_sync",
-                                          note="همگام‌سازی از سایت", conn=c, allow_negative=True)
-                    c.execute("UPDATE products SET woo_dirty=0 WHERE id=?", (row["id"],))
-                updated += 1
-            else:
-                cur = c.execute("INSERT INTO products(name,sku,category,price,stock,image,woo_id) VALUES(?,?,?,?,?,?,?)",
-                                (wp["name"], wp.get("sku") or None, cat, price, max(stock or 0, 0), img, wp["id"]))
-                if stock:
-                    c.execute("INSERT INTO stock_moves(product_id,qty,reason,note) VALUES(?,?,?,?)",
-                              (cur.lastrowid, stock, "woo_sync", "ورود اولیه از سایت"))
-                added += 1
-    return {"added": added, "updated": updated}
+        t = wp.get("type") or "simple"
+        if t not in ("simple", "variable"):
+            continue  # گروهی/خارجی/اشتراکی پشتیبانی نمی‌شود
+        src = (wp.get("images") or [{}])[0].get("src", "")
+        pid, how = _upsert(db, w, wp, kind="variable" if t == "variable" else "simple", parent_id=None,
+                           name=wp["name"], update_stock=update_stock, images=images, img_src=src)
+        out[how] += 1
+        if t == "variable":
+            for v in w.paged(f"products/{wp['id']}/variations"):
+                attrs = _attrs_text(v)
+                _, how = _upsert(db, w, v, kind="variation", parent_id=pid,
+                                 name=f"{wp['name']} - {attrs}" if attrs else wp["name"],
+                                 update_stock=update_stock, images=images, img_src=(v.get("image") or {}).get("src", ""))
+                out["variations"] += 1
+    return out
+
+
+def _mime(name):
+    return {"png": "image/png", "gif": "image/gif", "webp": "image/webp"}.get(name.rsplit(".", 1)[-1], "image/jpeg")
 
 
 def push_products(db, all_products=False, woo=None):
-    """ارسال قیمت و موجودی (و ساخت محصول جدید) به سایت. پیش‌فرض: فقط تغییریافته‌ها."""
+    """ارسال قیمت/موجودی/تصویر محصولات ساده و تنوع‌ها (و ساخت محصول ساده‌ٔ جدید). پیش‌فرض: فقط تغییریافته‌ها."""
     w = woo or Woo(db)
-    rows = db.q("SELECT * FROM products WHERE active=1" + ("" if all_products else " AND (woo_dirty=1 OR woo_id IS NULL)"))
-    updates, creates = [], []
+    rows = db.q("SELECT * FROM products WHERE active=1 AND kind!='variable'" +
+                ("" if all_products else " AND (woo_dirty=1 OR image_dirty=1 OR (woo_id IS NULL AND kind='simple'))"))
     if usd_rate(db) <= 0 and any(p["currency"] == "USD" for p in rows):
         raise AppError("محصول دلاری دارید ولی نرخ دلار تنظیم نشده؛ از ارسال قیمت صفر به سایت جلوگیری شد")
+    res = {"updated": 0, "created": 0, "images": 0, "images_failed": 0, "errors": []}
+    simple_up, var_up, creates, image_ok = [], {}, [], []
     for p in rows:
         p = services.with_toman(db, p)
         base = {"regular_price": w.price_out(p["price_toman"]), "manage_stock": True, "stock_quantity": p["stock"]}
-        if p["woo_id"]:
-            updates.append({"id": p["woo_id"], **base})
+        media = None
+        if p["image"] and p["woo_id"] and p["image_dirty"]:
+            try:
+                blob = (data_dir() / "images" / p["image"]).read_bytes()
+                media = w.wp_media(p["image"], blob, _mime(p["image"]))
+            except (AppError, OSError) as e:
+                res["images_failed"] += 1
+                res["errors"].append(str(e)[:160])
+        if p["kind"] == "variation":
+            parent = db.one("SELECT woo_id FROM products WHERE id=?", (p["parent_id"],))
+            if not (p["woo_id"] and parent and parent["woo_id"]):
+                continue  # ساخت تنوع جدید از برنامه پشتیبانی نمی‌شود
+            item = {"id": p["woo_id"], **base, **({"image": {"id": media}} if media else {})}
+            var_up.setdefault(parent["woo_id"], []).append(item)
+        elif p["woo_id"]:
+            simple_up.append({"id": p["woo_id"], **base, **({"images": [{"id": media}]} if media else {})})
         else:
             creates.append((p["id"], {"name": p["name"], "type": "simple", "status": "publish",
                                       **({"sku": p["sku"]} if p["sku"] else {}), **base}))
-    for i in range(0, len(updates), 100):
-        w.request("POST", "products/batch", body={"update": updates[i:i + 100]})
+        if media:
+            image_ok.append(p["id"])
+    for i in range(0, len(simple_up), 100):
+        w.request("POST", "products/batch", body={"update": simple_up[i:i + 100]})
+    for parent_woo, items in var_up.items():
+        for i in range(0, len(items), 100):
+            w.request("POST", f"products/{parent_woo}/variations/batch", body={"update": items[i:i + 100]})
     for i in range(0, len(creates), 100):
         chunk = creates[i:i + 100]
-        res = w.request("POST", "products/batch", body={"create": [b for _, b in chunk]})
-        for (pid, _), made in zip(chunk, res.get("create", [])):
-            if made.get("id"):
-                db.conn.execute("UPDATE products SET woo_id=? WHERE id=?", (made["id"], pid))
-    ids = [p["id"] for p in rows]
-    if ids:
-        db.conn.execute(f"UPDATE products SET woo_dirty=0 WHERE id IN ({','.join('?'*len(ids))})", ids)
-    return {"updated": len(updates), "created": len(creates)}
+        made = w.request("POST", "products/batch", body={"create": [b for _, b in chunk]})
+        for (pid, _), m in zip(chunk, made.get("create", [])):
+            if m.get("id"):
+                with db.lock:
+                    db.conn.execute("UPDATE products SET woo_id=? WHERE id=?", (m["id"], pid))
+    res["updated"] = len(simple_up) + sum(len(v) for v in var_up.values())
+    res["created"] = len(creates)
+    res["images"] = len(image_ok)
+    done = [p["id"] for p in rows]
+    with db.lock:
+        if done:
+            db.conn.execute(f"UPDATE products SET woo_dirty=0 WHERE id IN ({','.join('?'*len(done))})", done)
+        if image_ok:
+            db.conn.execute(f"UPDATE products SET image_dirty=0 WHERE id IN ({','.join('?'*len(image_ok))})", image_ok)
+    return res
 
 
 def pull_orders(db, woo=None):
@@ -166,7 +244,8 @@ def pull_orders(db, woo=None):
             continue
         items = []
         for li in o.get("line_items", []):
-            p = db.one("SELECT id FROM products WHERE woo_id=?", (li.get("product_id"),))
+            p = (li.get("variation_id") and db.one("SELECT id FROM products WHERE woo_id=?", (li["variation_id"],))) \
+                or db.one("SELECT id FROM products WHERE woo_id=? AND kind!='variable'", (li.get("product_id"),))
             qty = int(li.get("quantity") or 0)
             if qty <= 0:
                 continue

@@ -42,8 +42,10 @@ def _num(v, name, minimum=0):
     return n
 
 
-def list_products(db, q="", category="", low_only=False):
+def list_products(db, q="", category="", low_only=False, sellable=False):
     sql, args = "SELECT * FROM products WHERE active=1", []
+    if sellable:  # والد محصول متغیر خودش فروختنی/انبارشدنی نیست؛ فقط تنوع‌هایش
+        sql += " AND kind!='variable'"
     if q:
         sql += " AND (name LIKE ? OR sku LIKE ?)"
         args += [f"%{q}%", f"%{q}%"]
@@ -52,7 +54,9 @@ def list_products(db, q="", category="", low_only=False):
         args.append(category)
     if low_only:
         sql += " AND stock<=min_stock"
-    return [with_toman(db, p) for p in db.q(sql + " ORDER BY id DESC", args)]
+    # تنوع‌ها بلافاصله بعد از والدشان می‌آیند
+    rows = db.q(sql + " ORDER BY COALESCE(parent_id, id) DESC, parent_id IS NOT NULL, id", args)
+    return [with_toman(db, p) for p in rows]
 
 
 def save_product(db, data: dict, pid=None):
@@ -96,7 +100,8 @@ def save_product(db, data: dict, pid=None):
 
 def delete_product(db, pid):
     with db.tx() as c:
-        used = c.execute("SELECT 1 FROM sale_items WHERE product_id=? LIMIT 1", (pid,)).fetchone()
+        kids = c.execute("UPDATE products SET active=0 WHERE parent_id=?", (pid,)).rowcount
+        used = kids or c.execute("SELECT 1 FROM sale_items WHERE product_id=? LIMIT 1", (pid,)).fetchone()
         if used:
             c.execute("UPDATE products SET active=0 WHERE id=?", (pid,))  # حفظ تاریخچهٔ فروش
         else:
@@ -194,7 +199,7 @@ def upsert_customer(db, first, last, phone, conn=None):
 # ---------- فروش ----------
 def create_sale(db, items, customer=None, discount=0, pay_method="cash", note="",
                 channel="offline", created_at=None, woo_order_id=None, decrement_stock=True,
-                total_override=None):
+                total_override=None, user_id=None, paid=None):
     if not items:
         raise AppError("فاکتور خالی است")
     allow_neg = db.get("allow_negative_stock", "0") == "1"
@@ -214,6 +219,8 @@ def create_sale(db, items, customer=None, discount=0, pay_method="cash", note=""
                 p = c.execute("SELECT * FROM products WHERE id=?", (it["product_id"],)).fetchone()
                 if not p:
                     raise AppError("محصول پیدا نشد")
+            if p and p["kind"] == "variable":
+                raise AppError(f"«{p['name']}» محصول متغیر است؛ یکی از تنوع‌هایش را انتخاب کنید")
             if p:
                 if p["currency"] == "USD" and usd_rate(db) <= 0:
                     raise AppError(f"نرخ دلار تنظیم نشده؛ قیمت «{p['name']}» قابل محاسبه نیست")
@@ -228,11 +235,17 @@ def create_sale(db, items, customer=None, discount=0, pay_method="cash", note=""
         if discount > subtotal:
             raise AppError("تخفیف بیشتر از جمع فاکتور است")
         total = total_override if total_override is not None else subtotal - discount
+        if pay_method == "credit":
+            if not cid:
+                raise AppError("فروش اعتباری نیاز به مشتری (شمارهٔ موبایل) دارد")
+            paid = min(max(int(_num(paid, "پیش‌پرداخت")), 0), total)
+        else:
+            paid = total
         number = (c.execute("SELECT COALESCE(MAX(number),1000)+1 FROM sales").fetchone()[0])
         cur = c.execute(
-            "INSERT INTO sales(number,customer_id,channel,subtotal,discount,total,cogs,pay_method,note,woo_order_id,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))",
-            (number, cid, channel, subtotal, discount, total, cogs, pay_method, note, woo_order_id, created_at))
+            "INSERT INTO sales(number,customer_id,channel,subtotal,discount,total,cogs,pay_method,note,woo_order_id,"
+            "user_id,paid,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))",
+            (number, cid, channel, subtotal, discount, total, cogs, pay_method, note, woo_order_id, user_id, paid, created_at))
         sid = cur.lastrowid
         for pid, name, qty, unit, cost in rows:
             c.execute("INSERT INTO sale_items(sale_id,product_id,name,qty,unit_price,unit_cost) VALUES(?,?,?,?,?,?)",
@@ -284,7 +297,9 @@ def delete_sale(db, sid):
 
 
 def list_customers(db, q=""):
-    sql = ("SELECT c.*, COUNT(s.id) AS orders, COALESCE(SUM(s.total),0) AS spent FROM customers c "
+    sql = ("SELECT c.*, COUNT(s.id) AS orders, COALESCE(SUM(s.total),0) AS spent, "
+           "COALESCE(SUM(s.total-s.paid),0) - COALESCE((SELECT SUM(amount) FROM payments "
+           "WHERE party_type='customer' AND party_id=c.id),0) AS balance FROM customers c "
            "LEFT JOIN sales s ON s.customer_id=c.id ")
     args = ()
     if q:
@@ -375,4 +390,159 @@ def dashboard(db):
     out["low_stock"] = len(list_products(db, low_only=True))
     out["products"] = db.one("SELECT COUNT(*) n FROM products WHERE active=1")["n"]
     out["customers"] = db.one("SELECT COUNT(*) n FROM customers")["n"]
+    out["receivable"], out["payable"] = (parties_summary(db)[k]["total"] for k in ("debtors", "creditors"))
     return out
+
+
+# ---------- تأمین‌کنندگان، فاکتور خرید ----------
+def save_supplier(db, data, sid=None):
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise AppError("نام تأمین‌کننده الزامی است")
+    phone = (data.get("phone") or "").strip()
+    with db.tx() as c:
+        if sid:
+            c.execute("UPDATE suppliers SET name=?, phone=?, note=? WHERE id=?", (name, phone, data.get("note", ""), sid))
+            return sid
+        return c.execute("INSERT INTO suppliers(name,phone,note) VALUES(?,?,?)", (name, phone, data.get("note", ""))).lastrowid
+
+
+def list_suppliers(db):
+    return db.q("SELECT s.*, COALESCE((SELECT SUM(total-paid) FROM purchases WHERE supplier_id=s.id),0)"
+                " - COALESCE((SELECT SUM(amount) FROM payments WHERE party_type='supplier' AND party_id=s.id),0)"
+                " AS balance FROM suppliers s ORDER BY s.id DESC")
+
+
+def delete_supplier(db, sid):
+    with db.tx() as c:
+        if c.execute("SELECT 1 FROM purchases WHERE supplier_id=? LIMIT 1", (sid,)).fetchone() or \
+                c.execute("SELECT 1 FROM payments WHERE party_type='supplier' AND party_id=? LIMIT 1", (sid,)).fetchone():
+            raise AppError("این تأمین‌کننده سابقهٔ خرید/پرداخت دارد و قابل حذف نیست")
+        c.execute("DELETE FROM suppliers WHERE id=?", (sid,))
+
+
+def _from_toman(db, toman: float, currency: str) -> float:
+    if currency == "USD":
+        rate = usd_rate(db)
+        if rate <= 0:
+            raise AppError("نرخ دلار در تنظیمات وارد نشده است")
+        return round(toman / rate, 2)
+    return round(toman)
+
+
+def create_purchase(db, supplier_id, items, paid=0, note="", user_id=None, created_at=None):
+    """فاکتور خرید: موجودی زیاد می‌شود و قیمت خرید کالا به‌صورت «میانگین موزون» به‌روز می‌شود."""
+    if not items:
+        raise AppError("فاکتور خرید خالی است")
+    with db.tx() as c:
+        if not c.execute("SELECT 1 FROM suppliers WHERE id=?", (supplier_id,)).fetchone():
+            raise AppError("تأمین‌کننده پیدا نشد")
+        rows, total = [], 0
+        for it in items:
+            qty, unit = int(_num(it.get("qty"), "تعداد")), int(_num(it.get("unit_cost"), "قیمت خرید"))
+            if qty <= 0:
+                raise AppError("تعداد باید بزرگ‌تر از صفر باشد")
+            p = c.execute("SELECT * FROM products WHERE id=? AND active=1", (it.get("product_id"),)).fetchone()
+            if not p or p["kind"] == "variable":
+                raise AppError("کالای فاکتور خرید نامعتبر است")
+            rows.append((p, qty, unit))
+            total += qty * unit
+        paid = min(max(int(_num(paid, "پرداختی")), 0), total)
+        number = c.execute("SELECT COALESCE(MAX(number),5000)+1 FROM purchases").fetchone()[0]
+        pid = c.execute("INSERT INTO purchases(number,supplier_id,total,paid,note,user_id,created_at) "
+                        "VALUES(?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))",
+                        (number, supplier_id, total, paid, note, user_id, created_at)).lastrowid
+        for p, qty, unit in rows:
+            c.execute("INSERT INTO purchase_items(purchase_id,product_id,qty,unit_cost) VALUES(?,?,?,?)", (pid, p["id"], qty, unit))
+            old_cost = to_toman(db, p["cost"], p["currency"])
+            stock = max(p["stock"], 0)
+            new_cost = round((stock * old_cost + qty * unit) / (stock + qty))
+            c.execute("UPDATE products SET cost=? WHERE id=?", (_from_toman(db, new_cost, p["currency"]), p["id"]))
+            adjust_stock(db, p["id"], qty, "purchase", ref=number, note="فاکتور خرید", conn=c)
+    return {"id": pid, "number": number, "total": total}
+
+
+def get_purchase(db, pid):
+    r = db.one("SELECT p.*, s.name AS supplier, s.phone FROM purchases p JOIN suppliers s ON s.id=p.supplier_id WHERE p.id=?", (pid,))
+    if not r:
+        raise AppError("فاکتور خرید پیدا نشد")
+    r["items"] = db.q("SELECT i.*, p.name FROM purchase_items i JOIN products p ON p.id=i.product_id WHERE purchase_id=?", (pid,))
+    r["jdate"] = jalali.to_jalali_str(r["created_at"])
+    return r
+
+
+def list_purchases(db, limit=200):
+    rows = db.q("SELECT p.*, s.name AS supplier FROM purchases p JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.id DESC LIMIT ?", (limit,))
+    for r in rows:
+        r["jdate"] = jalali.to_jalali_str(r["created_at"])
+    return rows
+
+
+def delete_purchase(db, pid):
+    """ابطال خرید: موجودی کم می‌شود (اگر کالا فروخته شده و موجودی کافی نباشد، رد می‌شود)."""
+    with db.tx() as c:
+        pu = c.execute("SELECT number FROM purchases WHERE id=?", (pid,)).fetchone()
+        if not pu:
+            raise AppError("فاکتور خرید پیدا نشد")
+        for it in c.execute("SELECT product_id, qty FROM purchase_items WHERE purchase_id=?", (pid,)).fetchall():
+            adjust_stock(db, it["product_id"], -it["qty"], "adjust", ref=pu["number"], note="ابطال فاکتور خرید", conn=c)
+        c.execute("DELETE FROM purchases WHERE id=?", (pid,))
+
+
+# ---------- حساب‌ها: بدهکار / بستانکار ----------
+def party_balance(db, party_type, pid) -> int:
+    """مثبت = طرف حساب بدهکار است (مشتری به ما) / ما بدهکاریم (تأمین‌کننده)."""
+    if party_type == "customer":
+        a = db.one("SELECT COALESCE(SUM(total-paid),0) v FROM sales WHERE customer_id=?", (pid,))["v"]
+    else:
+        a = db.one("SELECT COALESCE(SUM(total-paid),0) v FROM purchases WHERE supplier_id=?", (pid,))["v"]
+    b = db.one("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE party_type=? AND party_id=?", (party_type, pid))["v"]
+    return a - b
+
+
+def add_payment(db, party_type, pid, amount, method="cash", note="", user_id=None):
+    if party_type not in ("customer", "supplier"):
+        raise AppError("نوع طرف حساب نامعتبر است")
+    amount = int(_num(amount, "مبلغ"))
+    if amount <= 0:
+        raise AppError("مبلغ باید بزرگ‌تر از صفر باشد")
+    with db.tx() as c:
+        tbl = "customers" if party_type == "customer" else "suppliers"
+        if not c.execute(f"SELECT 1 FROM {tbl} WHERE id=?", (pid,)).fetchone():
+            raise AppError("طرف حساب پیدا نشد")
+    bal = party_balance(db, party_type, pid)
+    if amount > bal:
+        raise AppError(f"مبلغ بیشتر از مانده حساب ({bal:,}) است")
+    with db.tx() as c:
+        c.execute("INSERT INTO payments(party_type,party_id,amount,method,note,user_id) VALUES(?,?,?,?,?,?)",
+                  (party_type, pid, amount, method, note, user_id))
+
+
+def delete_payment(db, payment_id):
+    with db.tx() as c:
+        c.execute("DELETE FROM payments WHERE id=?", (payment_id,))
+
+
+def ledger(db, party_type, pid):
+    """صورت‌حساب با مانده تجمعی."""
+    if party_type == "customer":
+        rows = [(r["created_at"], f"فاکتور فروش {r['number']}", r["total"] - r["paid"], 0, None)
+                for r in db.q("SELECT number,total,paid,created_at FROM sales WHERE customer_id=?", (pid,)) if r["total"] - r["paid"]]
+    else:
+        rows = [(r["created_at"], f"فاکتور خرید {r['number']}", r["total"] - r["paid"], 0, None)
+                for r in db.q("SELECT number,total,paid,created_at FROM purchases WHERE supplier_id=?", (pid,)) if r["total"] - r["paid"]]
+    rows += [(r["created_at"], "پرداخت" + (f" — {r['note']}" if r["note"] else ""), 0, r["amount"], r["id"])
+             for r in db.q("SELECT * FROM payments WHERE party_type=? AND party_id=?", (party_type, pid))]
+    out, bal = [], 0
+    for when, title, debit, credit, payment_id in sorted(rows, key=lambda r: r[0]):
+        bal += debit - credit
+        out.append({"date": jalali.to_jalali_str(when), "title": title, "debit": debit, "credit": credit,
+                    "balance": bal, "payment_id": payment_id})
+    return out
+
+
+def parties_summary(db):
+    debtors = [c for c in list_customers(db) if c["balance"] > 0]
+    creditors = [s for s in list_suppliers(db) if s["balance"] > 0]
+    return {"debtors": {"rows": debtors, "total": sum(c["balance"] for c in debtors)},
+            "creditors": {"rows": creditors, "total": sum(s["balance"] for s in creditors)}}

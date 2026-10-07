@@ -6,3 +6,4 @@ dist/
 license_private.key
 *.db
 data/
+license_admin/

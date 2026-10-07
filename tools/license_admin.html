@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>پنل مدیریت لایسنس</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">
+<style>
+body{font-family:Tahoma,sans-serif;background:#f4f6fa;color:#1c2333;margin:0;font-size:14px}
+header{background:#1d4ed8;color:#fff;padding:12px 18px;display:flex;gap:14px;align-items:center}header h1{font-size:16px;margin:0;flex:1}
+nav button{background:#ffffff22;margin-left:4px}nav button.on{background:#fff;color:#1d4ed8}
+main{max-width:1000px;margin:16px auto;padding:0 12px}.card{background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:14px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid #e3e7ef;text-align:right;vertical-align:top}th{color:#6b7488}
+input,select,textarea{font:inherit;border:1px solid #cfd5e3;border-radius:6px;padding:6px 8px;max-width:100%}label{display:block;font-size:12px;color:#6b7488;margin:6px 0 2px}
+button{font:inherit;border:0;border-radius:6px;padding:6px 12px;background:#2563eb;color:#fff;cursor:pointer}button.sec{background:#e3e7ef;color:#1c2333}button.bad{background:#dc2626}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}.mut{color:#6b7488}.tag{background:#e3e7ef;border-radius:99px;padding:1px 8px;font-size:12px}.rev{text-decoration:line-through;opacity:.6}
+#toast{position:fixed;bottom:14px;left:14px}#toast div{background:#1c2333;color:#fff;padding:8px 12px;border-radius:6px;margin-top:5px}#toast .err{background:#dc2626}
+textarea.key{width:100%;direction:ltr;font-family:monospace;font-size:12px}.center{max-width:360px;margin:10vh auto}
+</style></head><body><div id="app"></div><div id="toast"></div>
+<script>
+'use strict';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=(s,e=document)=>e.querySelector(s); let csrf=null, S={}, tab='products';
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf||''},body:b===undefined?undefined:JSON.stringify(b)});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'خطا');return d}
+function toast(m,e){const d=document.createElement('div');d.textContent=m;if(e)d.className='err';$('#toast').append(d);setTimeout(()=>d.remove(),e?6000:3000)}
+const run=async(f,ok)=>{try{const r=await f();if(ok)toast(ok);return r}catch(e){toast(e.message,true)}};
+async function boot(){S=await(await fetch('/api/state')).json();csrf=S.csrf;
+  if(S.setup_needed||!S.logged_in){$('#app').innerHTML=`<div class="card center"><h2>${S.setup_needed?'تعیین رمز پنل':'ورود'}</h2>
+   <label>رمز</label><input id="pw" type="password" style="width:100%"><p><button id="go">ادامه</button></p></div>`;
+   $('#go').onclick=()=>run(async()=>{await api('POST',S.setup_needed?'/api/setup':'/api/login',{password:$('#pw').value}).then(d=>csrf=d.csrf);await boot()});
+   $('#pw').onkeydown=e=>e.key==='Enter'&&$('#go').click();return}
+  show()}
+function show(){const T={products:'محصولات و پلن‌ها',issue:'صدور لایسنس',issued:'لایسنس‌های صادرشده',publish:'انتشار کاتالوگ'};
+  $('#app').innerHTML=`<header><h1>پنل مدیریت لایسنس</h1><nav>${Object.entries(T).map(([k,v])=>`<button class="${k===tab?'on':''}" data-t="${k}">${v}</button>`).join('')}</nav></header><main id="m"></main>`;
+  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;show()});
+  if(!S.has_key){$('#m').innerHTML=`<div class="card"><h3>کلید امضا ساخته نشده</h3><p>بدون کلید خصوصی نمی‌توان لایسنس صادر کرد. این کار فقط یک‌بار انجام می‌شود؛ فایل <b>license_private.key</b> را پشتیبان بگیرید و هرگز منتشر نکنید.</p>
+    <button id="gk">ساخت کلید</button></div>`;$('#gk').onclick=()=>run(async()=>{await api('POST','/api/genkey',{});S.has_key=true;boot()},'کلید ساخته شد؛ برنامه را دوباره بسازید');return}
+  ({products:pProducts,issue:pIssue,issued:pIssued,publish:pPublish})[tab]($('#m'))}
+async function pProducts(el){const ps=await api('GET','/api/products');
+  el.innerHTML=`<div class="card"><h3>محصول / افزونهٔ جدید</h3><div class="row"><div><label>شناسه (انگلیسی)</label><input id="id" placeholder="plugin-sms-pro"></div>
+   <div><label>نام</label><input id="nm"></div><div><label>نوع</label><select id="kd"><option value="plugin">افزونه</option><option value="app">برنامه</option></select></div>
+   <div><label>روز آزمایشی</label><input id="td" value="0" size="4"></div><div><label>توضیح</label><input id="ds"></div><button id="ap">ذخیره</button></div></div>`+
+   ps.map(p=>`<div class="card"><h3>${esc(p.name)} <span class="tag">${esc(p.id)}</span> <span class="tag">${p.kind==='app'?'برنامه':'افزونه'}</span></h3>
+   <table><tr><th>پلن</th><th>عنوان</th><th>مدت (ماه)</th><th>قیمت (تومان)</th><th></th></tr>${p.plans.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.title)}</td>
+   <td>${x.months??'مادام‌العمر'}</td><td>${Number(x.price).toLocaleString('fa-IR')}</td><td><button class="bad" data-dp="${esc(p.id)}|${esc(x.id)}">حذف</button></td></tr>`).join('')}</table>
+   <div class="row" data-pf="${esc(p.id)}"><div><label>شناسهٔ پلن</label><input class="i" size="9" placeholder="12m"></div><div><label>عنوان</label><input class="t" size="12"></div>
+   <div><label>ماه (خالی=مادام‌العمر)</label><input class="m" size="6"></div><div><label>قیمت</label><input class="p" size="10"></div><button class="sec">افزودن/ویرایش پلن</button>
+   <button class="bad" data-dx="${esc(p.id)}">حذف محصول</button></div></div>`).join('');
+  $('#ap').onclick=()=>run(async()=>{await api('POST','/api/product',{id:$('#id').value,name:$('#nm').value,kind:$('#kd').value,trial_days:$('#td').value,description:$('#ds').value});pProducts(el)},'ذخیره شد');
+  el.querySelectorAll('[data-pf]').forEach(r=>$('button.sec',r).onclick=()=>run(async()=>{await api('POST','/api/plan',{product:r.dataset.pf,id:$('.i',r).value,title:$('.t',r).value,months:$('.m',r).value,price:$('.p',r).value});pProducts(el)},'ذخیره شد'));
+  el.querySelectorAll('[data-dp]').forEach(b=>b.onclick=()=>confirm('پلن حذف شود؟')&&run(async()=>{const[a,c]=b.dataset.dp.split('|');await api('DELETE',`/api/plan/${a}/${c}`);pProducts(el)}));
+  el.querySelectorAll('[data-dx]').forEach(b=>b.onclick=()=>confirm('محصول حذف شود؟')&&run(async()=>{await api('DELETE','/api/product/'+b.dataset.dx);pProducts(el)}))}
+async function pIssue(el){const ps=await api('GET','/api/products');
+  el.innerHTML=`<div class="card"><h3>صدور لایسنس</h3><div class="row"><div><label>محصول</label><select id="pr">${ps.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></div>
+   <div><label>پلن</label><select id="pl"></select></div><div><label>نام مشتری</label><input id="nm"></div><div><label>شناسهٔ دستگاه (اختیاری، توصیه می‌شود)</label><input id="mid" dir="ltr" size="18"></div>
+   <div><label>ویژگی‌ها (با ویرگول، اختیاری)</label><input id="ft" dir="ltr"></div><button id="is">صدور</button></div><div id="out"></div></div>`;
+  const fill=()=>{const p=ps.find(x=>x.id===$('#pr').value);$('#pl').innerHTML=p.plans.map(x=>`<option value="${esc(x.id)}">${esc(x.title)} — ${Number(x.price).toLocaleString('fa-IR')}</option>`).join('')};
+  $('#pr').onchange=fill;fill();
+  $('#is').onclick=()=>run(async()=>{const r=await api('POST','/api/issue',{product:$('#pr').value,plan:$('#pl').value,name:$('#nm').value,mid:$('#mid').value,features:$('#ft').value});
+   $('#out').innerHTML=`<label>کد لایسنس (برای مشتری ارسال شود)</label><textarea class="key" rows="4" readonly>${esc(r.key)}</textarea>`},'صادر شد')}
+async function pIssued(el){el.innerHTML=`<div class="card"><input id="q" placeholder="جست‌وجو (مشتری/محصول/شناسه)" style="width:100%"></div><div class="card" id="t"></div>`;
+  const load=()=>run(async()=>{const rows=await api('GET','/api/issued?q='+encodeURIComponent($('#q').value));
+   $('#t').innerHTML=`<table><tr><th>شناسه</th><th>مشتری</th><th>محصول/پلن</th><th>صدور</th><th>انقضا</th><th>دستگاه</th><th></th></tr>${rows.map(r=>`<tr class="${r.revoked?'rev':''}"><td>${esc(r.lid)}</td><td>${esc(r.customer)}</td>
+    <td>${esc(r.product)} / ${esc(r.plan)}</td><td>${esc(r.issued)}</td><td>${esc(r.expires||'بدون انقضا')}</td><td dir="ltr">${esc(r.mid||'—')}</td>
+    <td><button class="sec" data-k="${esc(r.key)}">کپی کد</button> <button class="${r.revoked?'sec':'bad'}" data-r="${esc(r.lid)}|${r.revoked?0:1}">${r.revoked?'رفع ابطال':'ابطال'}</button></td></tr>`).join('')}</table>
+    <p class="mut">ابطال پس از «انتشار کاتالوگ» و به‌روزرسانی کاتالوگ در برنامهٔ مشتری اعمال می‌شود.</p>`;
+   $('#t').querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.k).then(()=>toast('کپی شد')));
+   $('#t').querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{const[l,f]=b.dataset.r.split('|');run(async()=>{await api('POST','/api/revoke',{lid:l,revoked:f==='1'});load()},'انجام شد')})});
+  $('#q').oninput=load;load()}
+function pPublish(el){el.innerHTML=`<div class="card"><h3>انتشار کاتالوگ</h3><p>فایل امضاشدهٔ کاتالوگ (محصولات، پلن‌ها، قیمت‌ها، لایسنس‌های ابطال‌شده) ساخته می‌شود. آن را روی
+   <b dir="ltr">https://webakery.ir/api/accsoft/catalog</b> قرار دهید تا برنامه‌ها با «به‌روزرسانی کاتالوگ» بگیرند. یک نسخه هم داخل برنامه (accsoft/catalog.json) کپی می‌شود.</p>
+   <p class="mut">کلید عمومی: <span dir="ltr">${esc(S.pubkey||'')}</span></p><button id="pb">انتشار</button><pre id="o" dir="ltr"></pre></div>`;
+  $('#pb').onclick=()=>run(async()=>{const r=await api('POST','/api/publish',{});$('#o').textContent=JSON.stringify(r,null,1)},'منتشر شد')}
+boot();
+</script></body></html>

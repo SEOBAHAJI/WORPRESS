@@ -115,3 +115,16 @@ def products_html(db):
     e = html.escape
     rows = "".join(f"<tr><td>{e(p['sku'] or '')}</td><td>{e(p['name'])}</td><td>{fmt(p['price_toman'])}</td><td class=c>{p['stock']}</td></tr>" for p in services.list_products(db))
     return _page("لیست محصولات", f"<h2>لیست محصولات و موجودی</h2><table><tr><th>کد</th><th>نام</th><th>قیمت (تومان)</th><th>موجودی</th></tr>{rows}</table>")
+
+
+def purchase_html(db, pu):
+    e = html.escape
+    rows = "".join(f"<tr><td>{i+1}</td><td>{e(it['name'])}</td><td class=c>{it['qty']}</td><td class=n>{fmt(it['unit_cost'])}</td>"
+                   f"<td class=n>{fmt(it['qty']*it['unit_cost'])}</td></tr>" for i, it in enumerate(pu["items"]))
+    body = (f"<h2>{e(db.get('shop_name', 'فروشگاه'))}</h2><h3>فاکتور خرید شمارهٔ {pu['number']}</h3>"
+            f"<div>تاریخ: {pu['jdate']} | تأمین‌کننده: {e(pu['supplier'])} {e(pu['phone'] or '')}</div>"
+            f"<table><tr><th>#</th><th>کالا</th><th>تعداد</th><th>فی خرید</th><th>مبلغ</th></tr>{rows}"
+            f"<tr><td colspan=4>جمع</td><td class=n>{fmt(pu['total'])}</td></tr>"
+            f"<tr><td colspan=4>پرداخت‌شده</td><td class=n>{fmt(pu['paid'])}</td></tr>"
+            f"<tr><th colspan=4>مانده بدهی</th><th class=n>{fmt(pu['total']-pu['paid'])}</th></tr></table>")
+    return _page(f"خرید {pu['number']}", body)
