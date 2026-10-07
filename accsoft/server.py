@@ -9,7 +9,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, access, catalog, exports, jalali, licensing, plugins, security, services, sms, woo
-from .config import WEBAKERY_BASE, data_dir, resource_dir
+from .config import LICENSE_PORTAL_PATH, WEBAKERY_BASE, data_dir, resource_dir
 from .services import AppError
 
 SECRET_KEYS = {"woo_key", "woo_secret", "sms_apikey", "wp_app_password"}
@@ -100,7 +100,7 @@ class App:
             if not catalog.plan(catalog.load(), prod, plan):
                 raise AppError("پلن نامعتبر")
             q = urllib.parse.urlencode({"product": prod, "plan": plan, "mid": licensing.machine_id()})
-            return {"url": f"{WEBAKERY_BASE}/?{q}"}
+            return {"url": f"{WEBAKERY_BASE}{LICENSE_PORTAL_PATH}?{q}"}
 
         @r("GET", "/api/license/catalog")
         def lic_catalog(c):
@@ -113,7 +113,7 @@ class App:
         def lic_refresh(c):
             import urllib.request
             try:
-                with urllib.request.urlopen(f"{WEBAKERY_BASE}/api/accsoft/catalog", timeout=15) as resp:
+                with urllib.request.urlopen(f"{WEBAKERY_BASE}/wp-json/accsoft/v1/catalog", timeout=15) as resp:
                     doc = json.loads(resp.read(512 * 1024))
                 data = catalog.install(doc)
             except ValueError as e:
@@ -139,7 +139,7 @@ class App:
             order = re.sub(r"[^A-Za-z0-9_-]", "", c.body.get("order") or "")[:64]
             if not order:
                 raise AppError("کد سفارش را وارد کنید")
-            url = f"{WEBAKERY_BASE}/api/accsoft/license?" + urllib.parse.urlencode({"order": order, "mid": licensing.machine_id()})
+            url = f"{WEBAKERY_BASE}/wp-json/accsoft/v1/license?" + urllib.parse.urlencode({"order": order, "mid": licensing.machine_id()})
             try:
                 with urllib.request.urlopen(url, timeout=15) as resp:
                     key = json.loads(resp.read(8192)).get("license", "")

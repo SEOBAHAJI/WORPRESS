@@ -4,6 +4,7 @@ from pathlib import Path
 
 APP_NAME = "AccSoft"
 WEBAKERY_BASE = "https://webakery.ir"
+LICENSE_PORTAL_PATH = "/accsoft-panel/"   # صفحهٔ پیشخوان ساخته‌شده توسط افزونهٔ وردپرس
 TRIAL_DAYS = 7
 
 # قیمت پلن‌ها (تومان)
