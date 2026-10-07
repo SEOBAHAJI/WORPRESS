@@ -156,3 +156,25 @@ class WooTests(unittest.TestCase):
         with self.assertRaises(services.AppError):
             woo.save_image_bytes(b"\xff\xd8\xff" + b"0" * (3 * 1024 * 1024))
         self.assertTrue(woo.save_image_bytes(b"\x89PNG\r\n" + b"0" * 10).endswith(".png"))
+
+    def test_normalize_url(self):
+        n = woo.normalize_url
+        self.assertEqual(n(" shop.ir/ "), "https://shop.ir")
+        self.assertEqual(n("https://shop.ir/wp-json/wc/v3/"), "https://shop.ir")
+        self.assertEqual(n("http://a.ir/wp-admin/x"), "http://a.ir")
+        self.assertEqual(n(""), "")
+
+    def test_sync_all_first_time_pulls_stock_then_keeps_local_stock(self):
+        w = FakeWoo(self.db, [WP])
+        r = woo.sync_all(self.db, woo=w)
+        self.assertEqual((r["products"]["added"], r["orders"]["imported"] if "imported" in r["orders"] else 0), (1, 0))
+        p = services.list_products(self.db)[0]
+        self.assertEqual(p["stock"], 8)
+        services.adjust_stock(self.db, p["id"], -3)  # فروش حضوری → باید به سایت برود، نه برعکس
+        w2 = FakeWoo(self.db, [WP])
+        r = woo.sync_all(self.db, woo=w2)
+        self.assertEqual(services.list_products(self.db)[0]["stock"], 5)
+        sent = [c for c in w2.calls if c[1] == "products/batch"]
+        self.assertEqual(sent[0][3]["update"][0]["stock_quantity"], 5)
+        first_get = next(i for i, c in enumerate(w2.calls) if c[0] == "GET")
+        self.assertLess(w2.calls.index(sent[0]), first_get)  # ابتدا ارسال، بعد دریافت

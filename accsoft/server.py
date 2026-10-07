@@ -5,7 +5,7 @@ import mimetypes
 import re
 import threading
 import urllib.parse
-from datetime import date
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, access, catalog, exports, jalali, licensing, plugins, security, services, sms, woo
@@ -166,7 +166,7 @@ class App:
                 if k in PLAIN_KEYS:
                     if k == "usd_rate":
                         v = services._num(v, "نرخ دلار")
-                    db.set(k, str(v).strip() if k != "welcome_text" else str(v))
+                    db.set(k, woo.normalize_url(v) if k == "woo_url" else str(v).strip() if k != "welcome_text" else str(v))
                 elif k in SECRET_KEYS and v and v != "********":
                     db.set(k, security.seal(str(v).strip()))
             access.audit(db, c.user, "settings.update", ",".join(sorted(k for k in c.body if k in PLAIN_KEYS | SECRET_KEYS)))
@@ -179,6 +179,13 @@ class App:
 
         def _range(c):
             kind = c.query.get("kind", "")
+            if kind == "year":
+                try:
+                    jy = int(c.query.get("year", ""))
+                    s, e = jalali.month_range(jy, 1)[0], jalali.month_range(jy, 12)[1] - timedelta(days=1)
+                except Exception:
+                    raise AppError("سال نامعتبر است")
+                return s, e, "month"
             if kind in ("day", "week", "month") and not c.query.get("start"):
                 s, e = services.preset_range(kind)
             else:
@@ -326,6 +333,14 @@ class App:
         @r("POST", "/api/woo/push-products")
         def w2(c):
             return woo.push_products(db, all_products=bool(c.body.get("all")))
+
+        @r("POST", "/api/woo/test")
+        def w_test(c):
+            return woo.test_connection(db)
+
+        @r("POST", "/api/woo/sync")
+        def w_sync(c):
+            return woo.sync_all(db)
 
         @r("POST", "/api/woo/pull-orders")
         def w3(c):

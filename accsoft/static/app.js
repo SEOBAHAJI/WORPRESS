@@ -262,29 +262,74 @@ async function pCustomers(el) {
 }
 
 // ---------- گزارش‌ها ----------
+const JM = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+const short = n => { const a = Math.abs(n), f = x => x.toLocaleString('fa-IR', { maximumFractionDigits: 1 });
+  return (n < 0 ? '-' : '') + (a >= 1e9 ? f(a / 1e9) + ' م‌ر' : a >= 1e6 ? f(a / 1e6) + ' م' : a >= 1e3 ? f(a / 1e3) + ' هـ' : f(a)); };
+// نمودار میله‌ای دوتایی (فروش و سود)؛ ماه اول سمت راست (RTL)
+function barChart(rows) {
+  const W = 760, H = 270, L = 8, R = 48, T = 14, B = 34, n = rows.length || 1;
+  const hi = Math.max(1, ...rows.map(r => Math.max(r.revenue, r.profit))), lo = Math.min(0, ...rows.map(r => r.profit));
+  const span = hi - lo, y = v => T + (H - T - B) * (1 - (v - lo) / span), step = (W - L - R) / n, bw = Math.max(4, Math.min(22, step / 2.6));
+  const grid = [0, .25, .5, .75, 1].map(f => { const v = lo + span * f; return `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${W - R + 6}" y="${y(v) + 4}" font-size="10" fill="var(--mut)">${esc(short(v))}</text>`; }).join('');
+  const bars = rows.map((r, i) => { const cx = W - R - step * (i + .5), z = y(0);
+    const bar = (x, v, col) => `<rect x="${x}" y="${Math.min(y(v), z)}" width="${bw}" height="${Math.max(1, Math.abs(y(v) - z))}" rx="3" fill="${col}"/>`;
+    return `<g><title>${esc(r.label)}\nفروش: ${money(r.revenue)}\nسود: ${money(r.profit)}</title>${bar(cx - bw - 1, r.revenue, 'var(--pri)')}${bar(cx + 1, r.profit, r.profit < 0 ? 'var(--bad)' : 'var(--ok)')}
+      <text x="${cx}" y="${H - 14}" text-anchor="middle" font-size="${n > 14 ? 8 : 10}" fill="var(--mut)">${esc(r.short || r.label)}</text></g>`; }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="نمودار فروش و سود">${grid}${bars}</svg>
+    <div class="mut" style="font-size:12px"><span style="color:var(--pri)">■</span> فروش &nbsp; <span style="color:var(--ok)">■</span> سود پس از هزینه &nbsp; <span style="color:var(--bad)">■</span> زیان</div>`;
+}
+function donut(parts) {
+  const tot = parts.reduce((a, p) => a + p.v, 0), r = 52, c = 2 * Math.PI * r; let off = 0;
+  const arcs = tot ? parts.map(p => { const len = c * p.v / tot, o = `<circle r="${r}" cx="70" cy="70" fill="none" stroke="${p.col}" stroke-width="22" stroke-dasharray="${len} ${c - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"><title>${esc(p.t)}: ${money(p.v)}</title></circle>`; off += len; return o; }).join('')
+    : `<circle r="${r}" cx="70" cy="70" fill="none" stroke="var(--line)" stroke-width="22"/>`;
+  return `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 140 140" width="150" role="img" aria-label="سهم کانال‌ها">${arcs}<text x="70" y="74" text-anchor="middle" font-size="14" fill="var(--ink)">${tot ? '' : '—'}</text></svg>
+    <div>${parts.map(p => `<div style="margin:6px 0"><span style="color:${p.col}">●</span> ${esc(p.t)}: <b>${money(p.v)}</b> <span class="mut">(${tot ? Math.round(100 * p.v / tot).toLocaleString('fa-IR') : '۰'}٪)</span></div>`).join('')}</div></div>`;
+}
+const hbars = (rows, key) => { const m = Math.max(1, ...rows.map(r => r[key])); return rows.map(r => `<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(r.name)}</span><b>${money(r[key])}</b></div>
+  <div style="background:var(--line);border-radius:5px;height:9px"><div style="width:${Math.max(2, Math.round(100 * r[key] / m))}%;background:var(--pri);height:9px;border-radius:5px"></div></div></div>`).join(''); };
+
 async function pReports(el) {
-  render(el, h`<div class="card"><div class="row"><button data-k="day">امروز</button><button data-k="week">این هفته</button><button data-k="month">این ماه</button>
-    ${field('از', h`<input id="s" size="10" value="${todayJ()}">`)}${field('تا', h`<input id="e" size="10" value="${todayJ()}">`)}
+  const jy0 = +S.today.split('/')[0]; let year = jy0, mode = 'year';
+  render(el, h`<div class="card"><div class="row">
+    <button class="sec" data-m="year" id="my">📅 سالانه / ماهانه</button><button class="sec" data-m="range" id="mr">📆 بازهٔ دلخواه</button>
+    <span id="yr" class="row"><button class="sec" id="py">◀</button><b id="yl" style="min-width:60px;text-align:center"></b><button class="sec" id="ny">▶</button></span>
+    <span id="rg" class="row" style="display:none">${field('از', h`<input id="s" size="10" value="${todayJ()}">`)}${field('تا', h`<input id="e" size="10" value="${todayJ()}">`)}
     ${field('گروه‌بندی', h`<select id="pd"><option value="day">روزانه</option><option value="week">هفتگی</option><option value="month">ماهانه</option></select>`)}
+    <button class="sec" data-k="day">امروز</button><button class="sec" data-k="week">این هفته</button><button class="sec" data-k="month">این ماه</button></span>
     ${field('کانال', h`<select id="ch"><option value="">همه</option><option value="offline">حضوری</option><option value="online">آنلاین</option></select>`)}
-    <button class="sec" id="go">نمایش</button><a class="btn sec" id="x">Excel</a><button class="sec" id="pdf">PDF</button></div></div><div id="r"></div>`);
+    <button id="go">نمایش</button><a class="btn sec" id="x">Excel</a><button class="sec" id="pdf">PDF</button></div></div><div id="r"></div>`);
   const qs = k => { const q = new URLSearchParams({ channel: $('#ch').value });
-    k ? q.set('kind', k) : (q.set('start', faNum($('#s').value)), q.set('end', faNum($('#e').value)), q.set('period', $('#pd').value)); return q; };
+    if (mode === 'year') { q.set('kind', 'year'); q.set('year', year); }
+    else if (k) q.set('kind', k); else { q.set('start', faNum($('#s').value)); q.set('end', faNum($('#e').value)); q.set('period', $('#pd').value); }
+    return q; };
   const load = k => run(async () => {
+    $('#yl').textContent = year.toLocaleString('fa-IR', { useGrouping: false });
+    $('#yr').style.display = mode === 'year' ? '' : 'none'; $('#rg').style.display = mode === 'year' ? 'none' : '';
+    $('#my').className = mode === 'year' ? '' : 'sec'; $('#mr').className = mode === 'range' ? '' : 'sec';
     const q = qs(k); const r = await api('GET', '/api/report?' + q); const t = r.totals;
     $('#x').href = '/export/report.xlsx?' + q; $('#pdf').onclick = () => showPrint('/print/report?' + q);
-    const max = Math.max(1, ...r.series.map(s => s.revenue));
-    $('#r').innerHTML = h`<div class="grid"><div class="card stat"><small>فروش (${r.start} تا ${r.end})</small><b>${money(t.revenue)}</b><small>${t.count} فاکتور</small></div>
+    let rows = r.series.map(s => ({ ...s, gross: s.profit + s.expenses }));
+    if (mode === 'year') rows = JM.map((nm, i) => { const k2 = `${year}/${String(i + 1).padStart(2, '0')}`, f = r.series.find(s => s.label === k2) || { count: 0, revenue: 0, profit: 0, expenses: 0 };
+      return { ...f, label: nm, short: nm, month: i + 1, gross: f.profit + f.expenses }; });
+    const ch = Object.entries(r.by_channel);
+    $('#r').innerHTML = h`<div class="grid"><div class="card stat"><small>فروش (${r.start} تا ${r.end})</small><b>${money(t.revenue)}</b><small>${t.count.toLocaleString('fa-IR')} فاکتور</small></div>
       <div class="card stat"><small>سود ناخالص</small><b>${money(t.gross_profit)}</b></div><div class="card stat"><small>هزینه‌ها</small><b>${money(t.expenses)}</b></div>
       <div class="card stat"><small>${t.net_profit < 0 ? 'زیان' : 'سود'} خالص</small><b class="${profitCls(t.net_profit)}">${money(Math.abs(t.net_profit))}</b></div></div>
-      <div class="card"><h3>حضوری در برابر آنلاین</h3><table><tr><th>کانال</th><th>تعداد</th><th>فروش</th><th>سود ناخالص</th></tr>
-      ${Object.entries(r.by_channel).map(([k, v]) => h`<tr><td>${k === 'online' ? 'آنلاین' : 'حضوری'}</td><td>${v.count}</td><td>${money(v.revenue)}</td><td>${money(v.profit)}</td></tr>`)}</table></div>
-      <div class="card"><h3>روند</h3><table><tr><th>دوره</th><th>تعداد</th><th>فروش</th><th></th><th>سود پس از هزینه</th></tr>
-      ${r.series.map(s => h`<tr><td>${s.label}</td><td>${s.count}</td><td>${money(s.revenue)}</td><td style="width:30%"><div class="bar" style="width:${Math.round(100 * s.revenue / max)}%"></div></td><td class="${profitCls(s.profit)}">${money(s.profit)}</td></tr>`)}</table></div>
-      <div class="card"><h3>پرفروش‌ترین محصولات</h3><table><tr><th>کالا</th><th>تعداد</th><th>فروش</th><th>سود</th></tr>
-      ${r.top_products.map(p => h`<tr><td>${p.name}</td><td>${p.qty}</td><td>${money(p.revenue)}</td><td>${money(p.profit)}</td></tr>`)}</table></div>`.s;
+      <div class="card"><h3>${mode === 'year' ? 'روند ماهانه' : 'روند'}</h3>${raw(barChart(rows))}</div>
+      <div class="card"><h3>جدول ${mode === 'year' ? 'ماهانه' : 'دوره‌ای'}</h3><div style="overflow:auto"><table><tr><th>${mode === 'year' ? 'ماه' : 'دوره'}</th><th>فاکتور</th><th>فروش</th><th>سود ناخالص</th><th>هزینه</th><th>سود خالص</th></tr>
+      ${rows.map(s => h`<tr ${mode === 'year' ? raw(`data-mo="${s.month}" style="cursor:pointer"`) : ''}><td>${s.label}</td><td>${s.count.toLocaleString('fa-IR')}</td><td>${money(s.revenue)}</td><td>${money(s.gross)}</td><td>${money(s.expenses)}</td><td class="${profitCls(s.profit)}"><b>${money(s.profit)}</b></td></tr>`)}
+      <tr style="font-weight:700;background:var(--bg)"><td>جمع</td><td>${t.count.toLocaleString('fa-IR')}</td><td>${money(t.revenue)}</td><td>${money(t.gross_profit)}</td><td>${money(t.expenses)}</td><td class="${profitCls(t.net_profit)}">${money(t.net_profit)}</td></tr></table></div>
+      ${mode === 'year' ? h`<small class="mut">برای دیدن جزئیات روزانهٔ هر ماه روی ردیف آن کلیک کنید.</small>` : ''}</div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"><div class="card"><h3>حضوری در برابر آنلاین (فروش)</h3>${raw(donut([{ t: 'حضوری', v: r.by_channel.offline.revenue, col: 'var(--pri)' }, { t: 'آنلاین', v: r.by_channel.online.revenue, col: '#f59e0b' }]))}
+      <table style="margin-top:8px"><tr><th>کانال</th><th>تعداد</th><th>سود ناخالص</th></tr>${ch.map(([k, v]) => h`<tr><td>${k === 'online' ? 'آنلاین' : 'حضوری'}</td><td>${v.count.toLocaleString('fa-IR')}</td><td>${money(v.profit)}</td></tr>`)}</table></div>
+      <div class="card"><h3>پرفروش‌ترین محصولات</h3>${r.top_products.length ? raw(hbars(r.top_products.map(p => ({ ...p, name: `${p.name} (${p.qty.toLocaleString('fa-IR')} عدد)` })), 'revenue')) : h`<p class="mut">فروشی ثبت نشده.</p>`}</div></div>`.s;
+    $('#r').querySelectorAll('[data-mo]').forEach(tr => tr.onclick = () => { const m = String(tr.dataset.mo).padStart(2, '0'); mode = 'range';
+      $('#s').value = `${year}/${m}/01`; $('#e').value = `${year}/${m}/${m <= 6 ? 31 : m <= 11 ? 30 : 29}`; $('#pd').value = 'day'; load(); });
   });
-  el.querySelectorAll('[data-k]').forEach(b => b.onclick = () => load(b.dataset.k)); $('#go').onclick = () => load(); load('day');
+  el.querySelectorAll('[data-k]').forEach(b => b.onclick = () => load(b.dataset.k)); $('#go').onclick = () => load();
+  $('#my').onclick = () => { mode = 'year'; load(); }; $('#mr').onclick = () => { mode = 'range'; load(); };
+  $('#py').onclick = () => { year--; load(); }; $('#ny').onclick = () => { year++; load(); };
+  $('#ch').onchange = () => load(); load();
 }
 
 // ---------- هزینه‌ها ----------
@@ -298,12 +343,40 @@ async function pExpenses(el) {
 
 // ---------- ووکامرس ----------
 const WOO_LBL = { added: 'جدید', updated: 'به‌روز شد', variations: 'تنوع', created: 'ساخته شد', images: 'تصویر ارسال شد', images_failed: 'تصویر ناموفق', errors: 'خطاها', imported: 'سفارش وارد شد' };
+const wooLine = r => Object.entries(r || {}).filter(([, v]) => !Array.isArray(v) || v.length).map(([k, v]) => `${WOO_LBL[k] || k}: ${Array.isArray(v) ? v.join(' | ') : v}`).join('  ·  ') || 'تغییری نبود';
 async function pWoo(el) {
-  render(el, h`<div class="card"><p>ابتدا آدرس و کلیدهای API را در <a href="#settings">تنظیمات</a> وارد کنید.</p>
-    <div class="row"><button id="p1">⬇ دریافت محصولات از سایت</button><label><input type="checkbox" id="us"> موجودی هم از سایت بیاید</label></div><br>
-    <div class="row"><button id="p2">⬆ ارسال تغییرات (قیمت/موجودی/محصول جدید) به سایت</button><label><input type="checkbox" id="all"> همهٔ محصولات</label></div><br>
-    <button id="p3">⬇ دریافت سفارش‌های آنلاین</button></div><div class="card" id="out" class="mut"></div>`);
-  const act = (id, fn) => $(id).onclick = () => run(async () => { $('#out').textContent = 'در حال انجام...'; const r = await fn(); $('#out').innerHTML = h`<b>نتیجه:</b> ${Object.entries(r).filter(([, v]) => !Array.isArray(v) || v.length).map(([k, v]) => `${WOO_LBL[k] || k}: ${Array.isArray(v) ? v.join(' | ') : v}`).join('  ·  ')}`.s; toast('انجام شد'); });
+  const s = await api('GET', '/api/settings');
+  const connected = !!(s.woo_url && s.woo_key && s.woo_secret);
+  const f = (k, label, extra = '') => field(label, h`<input data-k="${k}" value="${s[k]}" ${raw(extra)} style="width:100%;direction:ltr;text-align:left">`);
+  render(el, h`<div class="card"><h3>۱) اتصال به سایت ${connected ? h`<span class="pos-n">✔ تنظیم شده</span>` : ''}</h3>
+    <details ${connected ? '' : raw('open')}><summary class="mut" style="cursor:pointer">${connected ? 'ویرایش اطلاعات اتصال' : 'اطلاعات اتصال را وارد کنید'}</summary>
+    <div class="grid">${f('woo_url', 'آدرس سایت', 'placeholder="example.ir"')}${f('woo_key', 'Consumer Key', 'type="password" autocomplete="off"')}${f('woo_secret', 'Consumer Secret', 'type="password" autocomplete="off"')}</div>
+    <p class="mut">کلید را از وردپرس بسازید: ووکامرس ← تنظیمات ← پیشرفته ← REST API ← افزودن کلید (دسترسی «خواندن/نوشتن»).</p>
+    <button id="cn">ذخیره و آزمایش اتصال</button> <span id="cs"></span></details></div>
+    <div class="card" style="text-align:center"><h3>۲) همگام‌سازی</h3>
+    <p class="mut">تغییرات برنامه (قیمت، موجودی، محصول جدید) را به سایت می‌فرستد و محصولات و سفارش‌های جدید سایت را می‌گیرد.</p>
+    <button id="sync" style="font-size:18px;padding:14px 40px" ${connected ? '' : raw('disabled')}>🔄 همگام‌سازی همه‌چیز</button><div id="out" style="margin-top:12px"></div></div>
+    <details class="card"><summary style="cursor:pointer">گزینه‌های پیشرفته</summary>
+    <div class="row" style="margin:10px 0"><button class="sec" id="p1">⬇ فقط دریافت محصولات</button><label><input type="checkbox" id="us"> موجودی هم از سایت بیاید</label></div>
+    <div class="row" style="margin:10px 0"><button class="sec" id="p2">⬆ فقط ارسال تغییرات</button><label><input type="checkbox" id="all"> همهٔ محصولات (نه فقط تغییرکرده‌ها)</label></div>
+    <div class="row" style="margin:10px 0"><button class="sec" id="p3">⬇ فقط دریافت سفارش‌های آنلاین</button></div>
+    <div class="grid">${field('واحد قیمت در سایت', h`<select data-k="woo_unit"><option value="toman" ${s.woo_unit !== 'rial' ? raw('selected') : ''}>تومان</option><option value="rial" ${s.woo_unit === 'rial' ? raw('selected') : ''}>ریال</option></select>`)}
+    ${f('wp_user', 'نام کاربری وردپرس (فقط برای ارسال تصویر)')}${f('wp_app_password', 'رمز برنامهٔ وردپرس (Application Password)', 'type="password" autocomplete="off"')}</div>
+    <label><input type="checkbox" data-k="woo_orders_decrement" ${s.woo_orders_decrement === '1' ? raw('checked') : ''}> با دریافت سفارش آنلاین، موجودی برنامه کم شود</label>
+    <p><button class="sec" id="sv">ذخیره</button></p></details>`);
+  const save = () => { const b = {}; el.querySelectorAll('[data-k]').forEach(i => b[i.dataset.k] = i.type === 'checkbox' ? (i.checked ? '1' : '0') : i.value); return api('PUT', '/api/settings', b); };
+  $('#sv').onclick = () => run(save, 'ذخیره شد');
+  $('#cn').onclick = () => run(async () => {
+    $('#cs').textContent = 'در حال آزمایش...'; await save(); const r = await api('POST', '/api/woo/test', {});
+    $('#cs').innerHTML = h`<b class="${r.ok ? 'pos-n' : 'neg'}">${r.ok ? '✔ ' : '✖ '}${r.detail}</b>`.s; if (r.ok) { $('#sync').disabled = false; }
+  });
+  const act = (id, fn) => $(id).onclick = () => run(async () => { $('#out').textContent = 'در حال انجام...'; const r = await fn(); $('#out').innerHTML = h`<b>نتیجه:</b> ${wooLine(r)}`.s; toast('انجام شد'); });
+  $('#sync').onclick = () => run(async () => {
+    $('#out').textContent = 'در حال همگام‌سازی... (برای فروشگاه‌های بزرگ ممکن است چند دقیقه طول بکشد)';
+    const r = await api('POST', '/api/woo/sync', {});
+    $('#out').innerHTML = h`<div>⬆ ارسال به سایت: ${wooLine(r.sent)}</div><div>⬇ محصولات: ${r.products ? wooLine(r.products) : 'انجام نشد (ابتدا خطای ارسال را رفع کنید)'}</div><div>🛒 سفارش‌ها: ${r.orders ? wooLine(r.orders) : '—'}</div>`.s;
+    toast('همگام‌سازی انجام شد');
+  });
   act('#p1', () => api('POST', '/api/woo/pull-products', { update_stock: $('#us').checked }));
   act('#p2', () => api('POST', '/api/woo/push-products', { all: $('#all').checked }));
   act('#p3', () => api('POST', '/api/woo/pull-orders', {}));
@@ -317,10 +390,7 @@ async function pSettings(el) {
   const sel = (k, label, opts) => field(label, h`<select data-k="${k}">${opts.map(([v, t]) => h`<option value="${v}" ${s[k] === v ? raw('selected') : ''}>${t}</option>`)}</select>`);
   render(el, h`<div class="card"><h3>فروشگاه و ارز</h3><div class="grid">${inp('shop_name', 'نام فروشگاه')}${inp('shop_phone', 'تلفن')}${inp('shop_address', 'آدرس')}
     ${inp('invoice_footer', 'متن پایین فاکتور')}${inp('usd_rate', 'نرخ دلار (تومان)')}</div>${sw('allow_negative_stock', 'اجازهٔ فروش با موجودی صفر')}</div>
-    <div class="card"><h3>ووکامرس</h3><div class="grid">${inp('woo_url', 'آدرس سایت (https://...)')}${inp('woo_key', 'Consumer Key', 'type="password" autocomplete="off"')}
-    ${inp('woo_secret', 'Consumer Secret', 'type="password" autocomplete="off"')}${sel('woo_unit', 'واحد قیمت سایت', [['toman', 'تومان'], ['rial', 'ریال']])}
-    ${inp('wp_user', 'نام کاربری وردپرس (برای ارسال تصویر)')}${inp('wp_app_password', 'رمز برنامهٔ وردپرس (Application Password)', 'type="password" autocomplete="off"')}</div>
-    ${sw('woo_orders_decrement', 'با دریافت سفارش آنلاین، موجودی برنامه کم شود')}</div>
+    <div class="card"><h3>ووکامرس</h3><p>اتصال و همگام‌سازی از صفحهٔ <a href="#woo">ووکامرس</a> انجام می‌شود.</p></div>
     <div class="card"><h3>پیامک خوش‌آمدگویی</h3>${sw('welcome_enabled', 'ارسال پیام به مشتری جدید')}<div class="grid">
     ${sel('sms_provider', 'پنل', [['none', 'غیرفعال'], ['kavenegar', 'کاوه‌نگار'], ['custom', 'سفارشی (URL)']])}${inp('sms_apikey', 'کلید API', 'type="password" autocomplete="off"')}${inp('sms_sender', 'شمارهٔ فرستنده')}
     ${inp('sms_url', 'آدرس سفارشی (https://..?to={to}&text={text}&key={key})')}${sel('sms_method', 'روش', [['GET', 'GET'], ['POST', 'POST (آدرس|بدنه)']])}</div>

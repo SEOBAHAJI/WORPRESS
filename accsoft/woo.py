@@ -13,10 +13,21 @@ from .services import AppError, usd_rate
 MAX_IMG = 3 * 1024 * 1024
 
 
+def normalize_url(u):
+    """آدرس سایت را مرتب می‌کند: بدون فاصله/اسلش پایانی/مسیر wp-json؛ بدون https، https اضافه می‌شود."""
+    u = (u or "").strip().replace("\u200c", "")
+    if not u:
+        return ""
+    if "://" not in u:
+        u = "https://" + u
+    u = u.split("/wp-json")[0].split("/wp-admin")[0]
+    return u.rstrip("/")
+
+
 class Woo:
     def __init__(self, db):
         self.db = db
-        url = (db.get("woo_url", "") or "").rstrip("/")
+        url = normalize_url(db.get("woo_url", ""))
         if not url:
             raise AppError("آدرس سایت ووکامرس در تنظیمات وارد نشده است")
         if not url.startswith("https://") and db.get("woo_allow_http", "0") != "1":
@@ -272,3 +283,33 @@ def pull_orders(db, woo=None):
     if last:
         db.set("woo_orders_after", last)
     return {"imported": imported}
+
+
+def test_connection(db):
+    """بررسی اتصال با پیام فارسی قابل‌فهم. → {ok, detail}"""
+    try:
+        w = Woo(db)
+        w.request("GET", "products", {"per_page": 1})
+        return {"ok": True, "detail": "اتصال برقرار است"}
+    except AppError as e:
+        m = str(e)
+        if " 401" in m or " 403" in m:
+            m = "کلیدها (Consumer Key/Secret) اشتباه است یا دسترسی «خواندن/نوشتن» ندارد"
+        elif " 404" in m:
+            m = "ووکامرس در این آدرس پیدا نشد (آدرس سایت یا فعال بودن REST API را بررسی کنید)"
+        return {"ok": False, "detail": m}
+
+
+def sync_all(db, woo=None):
+    """همگام‌سازی یک‌مرحله‌ای: ۱) ارسال تغییرات محلی ۲) دریافت محصولات ۳) دریافت سفارش‌های آنلاین.
+    اگر مرحلهٔ ارسال خطا بدهد، دریافت انجام نمی‌شود (تغییرات محلی ناخواسته رونویسی نشود).
+    موجودی فقط در اولین همگام‌سازی (وقتی هنوز محصولی به سایت وصل نیست) از سایت گرفته می‌شود."""
+    w = woo or Woo(db)
+    first = not db.one("SELECT 1 FROM products WHERE woo_id IS NOT NULL LIMIT 1")
+    out = {"sent": None, "products": None, "orders": None}
+    out["sent"] = push_products(db, woo=w)
+    if out["sent"]["errors"] and not out["sent"]["updated"] and not out["sent"]["created"]:
+        return out
+    out["products"] = pull_products(db, update_stock=first, woo=w)
+    out["orders"] = pull_orders(db, woo=w)
+    return out

@@ -26,11 +26,11 @@ def main():
         webview.create_window("نرم‌افزار حسابداری", url, width=1280, height=800)
         webview.start()
     except ImportError:
-        print(f"برنامه در مرورگر باز شد: {url}\nبستن تب مرورگر، برنامه را پس از چند ثانیه می‌بندد (یا Ctrl+C).")
+        print(f"برنامه در مرورگر باز شد: {url}\nبستن تب مرورگر، برنامه را پس از چند دقیقه می‌بندد (یا Ctrl+C).")
         srv.app.last_ping = time.time() + 60  # مهلت اولیه برای بالا آمدن مرورگر
         webbrowser.open(url)
         try:
-            while time.time() - srv.app.last_ping < 45:
+            while time.time() - srv.app.last_ping < 300:
                 time.sleep(2)
         except KeyboardInterrupt:
             pass
