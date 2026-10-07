@@ -1,13 +1,13 @@
 <?php
 if (!defined('ABSPATH')) exit;
-/* پنل مدیریت: منوی «لایسنس AccSoft» (فقط manage_options) */
+/* پنل مدیریت: منوی «لایسنس نرم‌افزارها» (فقط manage_options) */
 
 add_action('admin_menu', function () {
-    add_menu_page('لایسنس AccSoft', 'لایسنس AccSoft', 'manage_options', 'accsoft', 'accsoft_admin_page', 'dashicons-admin-network', 58);
+    add_menu_page('لایسنس نرم‌افزارها', 'لایسنس نرم‌افزارها', 'manage_options', 'accsoft', 'accsoft_admin_page', 'dashicons-admin-network', 58);
 });
 add_action('admin_notices', function () {
     if (!current_user_can('manage_options')) return;
-    if (!accsoft_pubkey_hex()) echo '<div class="notice notice-error"><p><b>AccSoft:</b> کلید خصوصی تنظیم نشده؛ لایسنس صادر نمی‌شود. به تب «تنظیمات و کلید» بروید.</p></div>';
+    if (!accsoft_pubkey_hex()) echo '<div class="notice notice-error"><p><b>لایسنس:</b> کلید خصوصی تنظیم نشده؛ لایسنس صادر نمی‌شود. به تب «تنظیمات و کلید» بروید.</p></div>';
 });
 
 function accsoft_admin_guard($action) {
@@ -29,7 +29,7 @@ function accsoft_admin_page() {
     global $wpdb;
     $tab = sanitize_key($_GET['tab'] ?? 'home');
     $tabs = ['home' => 'نمای کلی', 'products' => 'محصولات و پلن‌ها', 'licenses' => 'لایسنس‌ها', 'orders' => 'سفارش‌ها', 'settings' => 'تنظیمات و کلید'];
-    echo '<div class="wrap" dir="rtl"><h1>لایسنس AccSoft</h1><h2 class="nav-tab-wrapper">';
+    echo '<div class="wrap" dir="rtl"><h1>لایسنس نرم‌افزارها</h1><h2 class="nav-tab-wrapper">';
     foreach ($tabs as $k => $t) echo '<a class="nav-tab' . ($tab === $k ? ' nav-tab-active' : '') . '" href="' . esc_url(admin_url('admin.php?page=accsoft&tab=' . $k)) . '">' . esc_html($t) . '</a>';
     echo '</h2>';
     $msg = get_transient('accsoft_admin_msg');

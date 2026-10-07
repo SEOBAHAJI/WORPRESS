@@ -1,27 +1,27 @@
 ; Inno Setup — نصب برای کاربر جاری (بدون نیاز به دسترسی ادمین)
 #define AppVer GetEnv("APP_VERSION")
 [Setup]
-AppName=AccSoft
+AppName=Daftarchi
 AppVersion={#AppVer}
-AppPublisher=AccSoft
-DefaultDirName={autopf}\AccSoft
-DefaultGroupName=AccSoft
+AppPublisher=Daftarchi
+DefaultDirName={autopf}\Daftarchi
+DefaultGroupName=Daftarchi
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=AccSoft-Setup
+OutputBaseFilename=Daftarchi-Setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\AccSoft.exe
+UninstallDisplayIcon={app}\Daftarchi.exe
 
 [Files]
-Source: "..\dist\AccSoft.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\Daftarchi.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\AccSoft"; Filename: "{app}\AccSoft.exe"
-Name: "{autodesktop}\AccSoft"; Filename: "{app}\AccSoft.exe"
+Name: "{group}\Daftarchi"; Filename: "{app}\Daftarchi.exe"
+Name: "{autodesktop}\Daftarchi"; Filename: "{app}\Daftarchi.exe"
 
 [Run]
-Filename: "{app}\AccSoft.exe"; Description: "Run AccSoft"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Daftarchi.exe"; Description: "Run Daftarchi"; Flags: nowait postinstall skipifsilent
 
-; داده‌های کاربر (%APPDATA%\AccSoft) هنگام حذف برنامه عمداً پاک نمی‌شود.
+; داده‌های کاربر (%APPDATA%\Daftarchi) هنگام حذف برنامه عمداً پاک نمی‌شود.

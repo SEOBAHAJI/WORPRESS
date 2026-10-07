@@ -16,7 +16,7 @@ function accsoft_zibal_start($order) {
     $m = trim((string)accsoft_setting('zibal_merchant'));
     if ($m === '') throw new Exception('درگاه پرداخت هنوز تنظیم نشده است');
     $j = accsoft_zibal_post('request', ['merchant' => $m, 'amount' => (int)$order['amount'] * 10, 'orderId' => $order['code'],
-        'callbackUrl' => home_url('/?accsoft_cb=1'), 'description' => 'AccSoft ' . $order['product'] . '/' . $order['plan']]);
+        'callbackUrl' => home_url('/?accsoft_cb=1'), 'description' => 'License ' . $order['product'] . '/' . $order['plan']]);
     if ((int)($j['result'] ?? 0) !== 100 || empty($j['trackId'])) throw new Exception('خطای زیبال: ' . ($j['message'] ?? $j['result'] ?? '?'));
     global $wpdb;
     $wpdb->update(accsoft_t('orders'), ['track_id' => (string)$j['trackId']], ['id' => $order['id']]);

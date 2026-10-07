@@ -25,7 +25,7 @@ function accsoft_activate() {
     accsoft_install_tables();
     if (!get_option('accsoft_products')) {
         update_option('accsoft_products', [[
-            'id' => 'accsoft', 'name' => 'نرم‌افزار حسابداری فروشگاه', 'kind' => 'app', 'description' => '', 'trial_days' => 7,
+            'id' => 'accsoft', 'name' => 'دفترچی', 'kind' => 'app', 'description' => '', 'trial_days' => 7,
             'plans' => [
                 ['id' => 'm3', 'title' => '۳ ماهه', 'months' => 3, 'price' => 6000000],
                 ['id' => 'm6', 'title' => '۶ ماهه', 'months' => 6, 'price' => 9000000],

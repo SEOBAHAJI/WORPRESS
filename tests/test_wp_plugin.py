@@ -61,3 +61,21 @@ class WpPluginCompat(unittest.TestCase):
         self.assertEqual(self.o["am"], "2026-02-28")
         from accsoft import jalali
         self.assertEqual(self.o["j"], "%04d/%02d/%02d" % jalali.g2j(2026, 3, 21))
+
+
+@unittest.skipUnless(PHP, "php نصب نیست")
+class PhpClient(unittest.TestCase):
+    def test_php_client_verifies_python_license(self):
+        out = subprocess.run([PHP, "-r", "echo function_exists('sodium_crypto_sign_seed_keypair') ? 1 : 0;"], capture_output=True, text=True).stdout
+        if out != "1":
+            self.skipTest("sodium در php نیست")
+        cat = {"products": [{"id": "my-plugin", "plans": [{"id": "y", "months": 12}]}]}
+        key = licensing.make_license(TEST_SEED, "y", "x", "AAAA111122223333", date(2026, 1, 1), product="my-plugin", cat=cat, features=["pro"])
+        pub = ed25519.publickey(TEST_SEED).hex()
+        code = ("<?php require '%s/sdk/license-client.php'; $k=%s; $p=%s;"
+                "echo json_encode([SoftLicense::check($k,$p,'my-plugin','AAAA111122223333',[],'2026-06-01')['ok'],"
+                "SoftLicense::check($k,$p,'other','AAAA111122223333',[],'2026-06-01')['ok'],"
+                "SoftLicense::check($k,$p,'my-plugin','BBBB111122223333',[],'2026-06-01')['ok'],"
+                "SoftLicense::check($k,$p,'my-plugin','AAAA111122223333',[],'2027-06-01')['ok']]);") % (PLUGIN, json.dumps(key), json.dumps(pub))
+        r = subprocess.run([PHP], input=code, capture_output=True, text=True, timeout=60)
+        self.assertEqual(json.loads(r.stdout), [True, False, False, False], r.stdout + r.stderr)

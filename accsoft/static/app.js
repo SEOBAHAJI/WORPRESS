@@ -82,7 +82,7 @@ function go(page) {
   const banner = L.mode === 'trial' ? h`<div class="banner">دورهٔ آزمایشی: ${L.days_left} روز باقی مانده. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>`
     : L.mode === 'expired' ? h`<div class="banner bad">${L.tampered ? 'ساعت سیستم دستکاری شده است.' : (L.license_error || 'لایسنس معتبر نیست.')} فقط مشاهده و خروجی فعال است. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>` : '';
   const menu = [...visiblePages().map(([k, [t]]) => [k, t]), ...S.plugins.filter(p => p.menu).map(p => ['plugin:' + p.id, p.menu.title])];
-  $('#app').innerHTML = h`<div class="layout"><nav class="side"><h1>${S.shop_name || 'حسابداری'}</h1>
+  $('#app').innerHTML = h`<div class="layout"><nav class="side"><h1>${S.shop_name || 'دفترچی'}</h1>
     ${menu.map(([k, t]) => h`<a data-p="${k}" class="${k === page ? 'on' : ''}">${t}</a>`)}
     <a id="out">خروج (${S.user.username})</a></nav><main class="main">${banner}<div class="top"><h2>${title}</h2>
     ${HELP[page] ? h`<button class="sec" id="hlp">؟ راهنما</button>` : ''}</div><div id="page"></div></main></div>`.s;

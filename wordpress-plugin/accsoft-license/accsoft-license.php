@@ -1,7 +1,7 @@
 <?php
 /**
- * Plugin Name: AccSoft License Server
- * Description: سرور لایسنس نرم‌افزار حسابداری AccSoft: پنل مدیریت، پیشخوان مشتری (خرید/تمدید/انتقال)، پرداخت زیبال و API برای برنامه.
+ * Plugin Name: Software License Server (Daftarchi)
+ * Description: سرور لایسنس عمومی برای دفترچی و هر نرم‌افزار/افزونهٔ دیگر: پنل مدیریت، پیشخوان مشتری (خرید/تمدید/انتقال)، پرداخت زیبال و API برای برنامه.
  * Version: 1.0.0
  * Requires PHP: 7.4
  * Text Domain: accsoft-license

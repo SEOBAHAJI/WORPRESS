@@ -4,8 +4,8 @@ rem ابتدا یک‌بار:  python tools\license_tool.py genkey   (کلید �
 findstr /C:"PUBLIC_KEY_HEX = \"\"" accsoft\pubkey.py >nul && (echo خطا: ابتدا genkey را اجرا کنید & exit /b 1)
 set EXTRA=
 if exist accsoft\catalog.json set EXTRA=--add-data "accsoft\catalog.json;accsoft"
-pyinstaller --noconfirm --onefile --windowed --name AccSoft ^
+pyinstaller --noconfirm --onefile --windowed --name Daftarchi ^
   --add-data "accsoft\static;accsoft\static" %EXTRA% ^
   --exclude-module tkinter --exclude-module unittest --exclude-module pydoc ^
   main.py
-echo فایل نهایی: dist\AccSoft.exe
+echo فایل نهایی: dist\Daftarchi.exe

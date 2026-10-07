@@ -43,7 +43,7 @@ def verify_doc(doc):
 
 def default_data():
     return {"version": 0, "revoked": [], "products": [{
-        "id": APP_PRODUCT, "name": "نرم‌افزار حسابداری فروشگاه", "kind": "app", "description": "", "trial_days": 7,
+        "id": APP_PRODUCT, "name": "دفترچی", "kind": "app", "description": "", "trial_days": 7,
         "plans": [{"id": k, "title": v["title"], "months": v["months"], "price": v["price"]} for k, v in PLANS.items()]}]}
 
 

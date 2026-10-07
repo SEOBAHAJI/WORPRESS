@@ -510,7 +510,7 @@ def make_handler(app: App):
     static_root = resource_dir() / "static"
 
     class H(BaseHTTPRequestHandler):
-        server_version = "AccSoft"
+        server_version = "Daftarchi"
         sys_version = ""
 
         def log_message(self, *a):
