@@ -10,6 +10,11 @@ from accsoft.server import create_server
 
 
 def main():
+    import os
+    # نسخهٔ --windowed (بدون کنسول) stdout/stderr ندارد؛ print و traceback نباید برنامه را بیندازند
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     db = DB()
     srv = create_server(db)
     url = f"http://127.0.0.1:{srv.app.port}/"

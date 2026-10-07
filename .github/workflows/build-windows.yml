@@ -1,0 +1,47 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/accounting-software-dev-33f97k]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install deps
+        run: pip install -r requirements.txt pyinstaller
+      - name: Tests
+        run: python -W ignore -m unittest discover -s tests -t .
+      - name: Build exe
+        shell: pwsh
+        run: |
+          $extra = @()
+          if (Test-Path accsoft/catalog.json) { $extra = @("--add-data", "accsoft/catalog.json;accsoft") }
+          pyinstaller --noconfirm --onefile --windowed --name AccSoft `
+            --add-data "accsoft/static;accsoft/static" @extra `
+            --exclude-module tkinter --exclude-module unittest --exclude-module pydoc main.py
+          if (-not (Test-Path dist/AccSoft.exe)) { throw "exe not built" }
+      - name: Smoke test exe starts
+        shell: pwsh
+        run: |
+          $env:ACCSOFT_DATA = "$PWD\smoke-data"
+          $p = Start-Process dist/AccSoft.exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "exe exited early (code $($p.ExitCode))" }
+          Stop-Process $p -Force
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $env:APP_VERSION = (Select-String -Path accsoft/__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc installer/accsoft.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AccSoft-windows
+          path: |
+            dist/AccSoft-Setup.exe
+            dist/AccSoft.exe
