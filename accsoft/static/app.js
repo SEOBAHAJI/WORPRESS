@@ -50,18 +50,18 @@ async function boot() {
   if (!S.logged_in) return loginView();
   go(location.hash.slice(1) || 'dashboard');
 }
-function authBox(title, extra, btn, fn) {
+function authBox(title, extra, btn, fn, setup) {
   $('#app').innerHTML = h`<div class="center card"><h2>${title}</h2>${extra}
-    ${field('نام کاربری', h`<input id="u" autocomplete="username" style="width:100%">`)}
-    ${field('رمز عبور', h`<input id="p" type="password" autocomplete="current-password" style="width:100%">`)}
+    ${field('نام کاربری', h`<input id="u" autocomplete="${setup ? 'off' : 'username'}" style="width:100%">`)}
+    ${field('رمز عبور', h`<input id="p" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" style="width:100%">`)}
     <p><button id="go">${btn}</button></p></div>`.s;
   $('#go').onclick = () => run(async () => { await fn($('#u').value, $('#p').value); await boot(); });
-  $('#p').onkeydown = e => e.key === 'Enter' && $('#go').click();
+  $('#p').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
 }
 const loginView = () => authBox('ورود', '', 'ورود', (u, p) => api('POST', '/api/login', { username: u, password: p }));
 function setupView() {
   authBox('نصب اولیه', field('نام فروشگاه', h`<input id="shop" style="width:100%">`) , 'ایجاد حساب مدیر',
-    (u, p) => api('POST', '/api/setup', { username: u, password: p, shop_name: $('#shop').value }));
+    (u, p) => api('POST', '/api/setup', { username: u, password: p, shop_name: $('#shop').value }), true);
   $('.center').insertAdjacentHTML('beforeend', '<p class="mut">رمز حداقل ۸ نویسه. آن را فراموش نکنید؛ بازیابی ندارد.</p>');
 }
 
