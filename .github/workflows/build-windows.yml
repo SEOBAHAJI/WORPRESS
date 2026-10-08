@@ -21,6 +21,7 @@ jobs:
           if (Test-Path accsoft/catalog.json) { $extra = @("--add-data", "accsoft/catalog.json;accsoft") }
           pyinstaller --noconfirm --onefile --windowed --name Daftarchi `
             --add-data "accsoft/static;accsoft/static" @extra `
+            --collect-all webview --collect-all pythonnet --collect-all clr_loader `
             --exclude-module tkinter --exclude-module unittest --exclude-module pydoc main.py
           if (-not (Test-Path dist/Daftarchi.exe)) { throw "exe not built" }
       - name: Smoke test exe starts
@@ -31,6 +32,10 @@ jobs:
           Start-Sleep -Seconds 8
           if ($p.HasExited) { throw "exe exited early (code $($p.ExitCode))" }
           Stop-Process $p -Force
+          $log = Get-Content "$PWD\smoke-data\startup.log" -Raw
+          Write-Host $log
+          if ($log -match "browser-fallback") { throw "native window failed: $log" }
+          if ($log -notmatch "native-start") { throw "no native start logged" }
       - name: Build installer
         shell: pwsh
         run: |
