@@ -24,6 +24,7 @@ class WB_License_Client {
         add_filter('pre_set_site_transient_update_plugins', [$this, 'check_update']);
         add_filter('plugins_api', [$this, 'plugin_info'], 10, 3);
     }
+    private function title() { return $this->c['name'] ?? $this->c['product']; }
     private function opt($k) { return $this->c['product'] . '_' . $k; }
     private function domain() { return preg_replace('/^www\./i', '', strtolower((string)parse_url(home_url(), PHP_URL_HOST))); }
     private function call($action, $args = []) {
@@ -54,7 +55,7 @@ class WB_License_Client {
         delete_option($this->opt('license_key')); delete_transient($this->opt('lic_ok'));
     }
 
-    public function menu() { add_submenu_page('plugins.php', 'لایسنس ' . $this->c['product'], 'لایسنس ' . $this->c['product'], 'manage_options', $this->opt('license'), [$this, 'page']); }
+    public function menu() { add_submenu_page('plugins.php', 'لایسنس ' . $this->title(), 'لایسنس ' . $this->title(), 'manage_options', $this->opt('license'), [$this, 'page']); }
     public function page() {
         if (!current_user_can('manage_options')) return;
         $msg = '';
@@ -62,7 +63,7 @@ class WB_License_Client {
             if (isset($_POST['deactivate'])) { $this->deactivate(); $msg = 'لایسنس از این سایت برداشته شد.'; }
             else { $r = $this->activate(sanitize_text_field($_POST['key'] ?? '')); $msg = $r['message'] ?? ''; }
         }
-        echo '<div class="wrap" dir="rtl"><h1>لایسنس ' . esc_html($this->c['product']) . '</h1>' . ($msg ? '<div class="notice notice-info"><p>' . esc_html($msg) . '</p></div>' : '');
+        echo '<div class="wrap" dir="rtl"><h1>لایسنس ' . esc_html($this->title()) . '</h1>' . ($msg ? '<div class="notice notice-info"><p>' . esc_html($msg) . '</p></div>' : '');
         echo '<p>وضعیت: <b>' . ($this->is_active() ? '✅ فعال' : '❌ غیرفعال') . '</b></p><form method="post">' . wp_nonce_field($this->opt('lic'), $this->opt('nonce'), true, false);
         echo '<input name="key" value="' . esc_attr($this->key()) . '" style="width:320px;direction:ltr" placeholder="XXXXXX-XXXX-XXXX-XXXX-XXXX"> <button class="button button-primary">فعال‌سازی</button> ';
         if ($this->key()) echo '<button class="button" name="deactivate" value="1">برداشتن از این سایت</button>';

@@ -172,3 +172,12 @@ class Upload(unittest.TestCase):
         self.assertFalse(c["injected"])
         bad = json.loads(self.php("ingest", {"zip": self.mkzip("d.zip", {"p-d/p-d.php": self.PLUG % "1.0"}), "opts": self.opts, "o": {"plans_text": "bad line"}}))
         self.assertIn("پلن", bad["error"])
+
+    def test_custom_name(self):
+        import zipfile
+        z = self.mkzip("n.zip", {"my-plugin/my-plugin.php": self.PLUG % "1.0.0"})
+        self.php("ingest", {"zip": z, "opts": self.opts, "o": {"label": "افزونهٔ من"}})
+        zf = zipfile.ZipFile(next((self.tmp / "up" / "accsoft-updates").glob("*.zip")))
+        self.assertIn("افزونهٔ من", zf.read("my-plugin/my-plugin.php").decode())
+        prods = json.loads(self.php("sql", {"q": "SELECT 1 x"}))
+        self.assertTrue(prods)
