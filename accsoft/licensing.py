@@ -1,4 +1,4 @@
-﻿"""لایسنس آفلاین با امضای Ed25519 برای هر «محصول» (برنامهٔ اصلی یا افزونه). کلید خصوصی فقط نزد فروشنده است.
+"""لایسنس آفلاین با امضای Ed25519 برای هر «محصول» (برنامهٔ اصلی یا افزونه). کلید خصوصی فقط نزد فروشنده است.
 قالب: base64url(payload_json).base64url(signature)
 payload: {v:2, lid, product, plan, name, issued, expires|null, mid, features:[...]}  (v1 = برنامهٔ اصلی)"""
 import base64
@@ -99,7 +99,6 @@ def entitlements(db, today=None, tampered=False):
 
 
 def status(db, now: datetime = None):
-    return {"machine_id": "TEST", "tampered": False, "mode": "licensed", "plan": "lifetime", "name": "Lifetime License", "expires": None, "features": ["woo", "sms", "plugins", "unlimited"]}
     """وضعیت برنامهٔ اصلی: mode = licensed | trial | expired. شامل تشخیص برگرداندن ساعت سیستم."""
     now = now or datetime.now()
     last = db.get("last_seen")

@@ -724,7 +724,7 @@ def make_handler(app: App):
                 if not public and not ctx.session:
                     return self._json(401, {"error": "ورود لازم است"})
                 if not public:
-                    ctx.user = db.one("SELECT * FROM users WHERE role='admin' LIMIT 1") or {"id": 1, "username": "admin", "role": "admin", "full_name": "Admin"}
+                    ctx.user = app._user(ctx.session)
                     if not ctx.user:  # کاربر حذف/غیرفعال شده
                         app.sessions.drop(ctx.sid)
                         return self._json(401, {"error": "ورود لازم است"})
