@@ -58,7 +58,23 @@ function authBox(title, extra, btn, fn, setup) {
   $('#go').onclick = () => run(async () => { await fn($('#u').value, $('#p').value); await boot(); });
   $('#p').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
 }
-const loginView = () => authBox('ورود', '', 'ورود', (u, p) => api('POST', '/api/login', { username: u, password: p }));
+const loginView = () => {
+  authBox('ورود', '', 'ورود', (u, p) => api('POST', '/api/login', { username: u, password: p }));
+  $('.center').insertAdjacentHTML('beforeend', '<p><a id="fg" style="cursor:pointer;color:var(--pri)">رمز عبور را فراموش کرده‌ام</a></p>');
+  $('#fg').onclick = resetView;
+};
+function resetView() {
+  $('#app').innerHTML = h`<div class="center card"><h2>بازیابی رمز عبور</h2>
+    <p class="mut">۱) «ساخت کد» را بزنید تا یک فایل کد در پوشهٔ داده‌های برنامه ساخته شود (فقط کسی که به این کامپیوتر دسترسی دارد می‌تواند آن را بخواند).</p>
+    <p><button id="rq">۱) ساخت کد بازیابی</button></p><div id="rinfo" class="mut"></div>
+    ${field('نام کاربری (خالی = مدیر اصلی)', h`<input id="ru" style="width:100%">`)}${field('کد بازیابی', h`<input id="rc" style="width:100%;direction:ltr" autocomplete="off">`)}
+    ${field('رمز جدید (حداقل ۸ نویسه)', h`<input id="rp" type="password" style="width:100%" autocomplete="new-password">`)}
+    <p><button id="rg">۲) تغییر رمز</button> <button class="sec" id="rb">بازگشت</button></p></div>`.s;
+  $('#rq').onclick = () => run(async () => { const r = await api('POST', '/api/reset/request', {});
+    $('#rinfo').innerHTML = h`فایل را باز کنید و کد را بخوانید:<br><b dir="ltr">${r.path}</b>`.s; });
+  $('#rg').onclick = () => run(async () => { await api('POST', '/api/reset/confirm', { username: $('#ru').value, code: $('#rc').value, password: $('#rp').value }); toast('رمز تغییر کرد؛ وارد شوید'); loginView(); });
+  $('#rb').onclick = loginView;
+}
 function setupView() {
   authBox('نصب اولیه', field('نام فروشگاه', h`<input id="shop" style="width:100%">`) , 'ایجاد حساب مدیر',
     (u, p) => api('POST', '/api/setup', { username: u, password: p, shop_name: $('#shop').value }), true);

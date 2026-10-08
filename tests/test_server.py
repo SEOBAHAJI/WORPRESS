@@ -155,3 +155,34 @@ class ServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResetTests(unittest.TestCase):
+    def test_reset_flow(self):
+        import os
+        import tempfile
+        os.environ["ACCSOFT_DATA"] = tempfile.mkdtemp()
+        self.addCleanup(os.environ.pop, "ACCSOFT_DATA", None)
+        db = fresh_db()
+        srv = create_server(db)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        c = Client(srv.app.port)
+        c.login("boss", "Abcdef123")
+        c.call("POST", "/api/logout", {})
+        c = Client(srv.app.port)
+        st, r, _ = c.call("POST", "/api/reset/request", {})
+        self.assertEqual(st, 200)
+        code = open(r["path"], encoding="utf-8").read().split(":")[1].split()[0]
+        st, d, _ = c.call("POST", "/api/reset/confirm", {"code": "ZZZZZZZZ", "password": "NewPass123"})
+        self.assertEqual(st, 400)
+        st, d, _ = c.call("POST", "/api/reset/confirm", {"code": code, "password": "short"})
+        self.assertEqual(st, 400)
+        st, d, _ = c.call("POST", "/api/reset/confirm", {"code": code, "password": "NewPass123"})
+        self.assertEqual((st, d["username"]), (200, "boss"))
+        self.assertFalse(os.path.exists(r["path"]))
+        self.assertEqual(c.call("POST", "/api/login", {"username": "BOSS", "password": "NewPass123"})[0], 200)   # حروف بزرگ/کوچک مهم نیست
+        c2 = Client(srv.app.port)
+        self.assertEqual(c2.call("POST", "/api/login", {"username": "boss", "password": "Abcdef123"})[0], 400)
+        self.assertEqual(c2.call("POST", "/api/reset/confirm", {"code": code, "password": "Another123"})[0], 400)   # یک‌بار مصرف

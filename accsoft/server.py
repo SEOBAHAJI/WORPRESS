@@ -3,6 +3,7 @@ import base64
 import json
 import mimetypes
 import re
+import secrets
 import threading
 import urllib.parse
 from datetime import date, timedelta
@@ -70,6 +71,47 @@ class App:
         @r("POST", "/api/login", public=True)
         def login(c):
             return self._login(c, (c.body.get("username") or "").strip(), c.body.get("password") or "")
+
+        # ----- فراموشی رمز: اثبات دسترسی به فایل‌های همین کامپیوتر (کد در پوشهٔ داده نوشته می‌شود) -----
+        @r("POST", "/api/reset/request", public=True)
+        def reset_request(c):
+            import time
+            if not db.one("SELECT 1 FROM users"):
+                raise AppError("هنوز حسابی ساخته نشده است")
+            code = secrets.token_hex(4).upper()
+            self.reset = {"code": code, "exp": time.time() + 600, "tries": 0}
+            path = data_dir() / "reset-code.txt"
+            path.write_text(f"کد بازیابی رمز دفترچی: {code}\nاین کد ۱۰ دقیقه معتبر است. آن را در صفحهٔ بازیابی رمز بنویسید.\n", encoding="utf-8")
+            return {"path": str(path)}
+
+        @r("POST", "/api/reset/confirm", public=True)
+        def reset_confirm(c):
+            import time
+            st = getattr(self, "reset", None)
+            if not st or st["exp"] < time.time() or st["tries"] >= 5:
+                self.reset = None
+                raise AppError("کدی درخواست نشده یا منقضی شده است؛ دوباره درخواست کد بدهید")
+            st["tries"] += 1
+            if not hmac_eq((c.body.get("code") or "").strip().upper(), st["code"]):
+                raise AppError("کد نادرست است")
+            new = c.body.get("password") or ""
+            if len(new) < 8:
+                raise AppError("رمز جدید حداقل ۸ نویسه باشد")
+            name = (c.body.get("username") or "").strip()
+            u = (db.one("SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1", (name,)) if name else None) \
+                or db.one("SELECT * FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1")
+            if not u:
+                raise AppError("کاربر مدیر پیدا نشد")
+            with db.tx() as cx:
+                cx.execute("UPDATE users SET pass_hash=? WHERE id=?", (security.hash_password(new), u["id"]))
+            self.reset = None
+            self.sessions.clear_fails(u["username"])
+            try:
+                (data_dir() / "reset-code.txt").unlink()
+            except OSError:
+                pass
+            access.audit(db, u, "password.reset")
+            return {"username": u["username"]}
 
         @r("POST", "/api/logout")
         def logout(c):
