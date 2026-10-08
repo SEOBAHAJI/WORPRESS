@@ -82,6 +82,7 @@ MIGRATIONS = [
     INSERT INTO licenses(product,key) SELECT 'accsoft', value FROM settings WHERE key='license_key' AND value!='';
     DELETE FROM settings WHERE key='license_key';
     """,
+    "ALTER TABLE users ADD COLUMN account TEXT NOT NULL DEFAULT ''"
 ]
 
 

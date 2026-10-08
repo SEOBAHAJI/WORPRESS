@@ -120,6 +120,7 @@ function accsoft_admin_page() {
         $s = get_option('accsoft_settings', []);
         echo '<h3>درگاه و محدودیت‌ها</h3>' . accsoft_form('accsoft_save_settings',
             '<p>مرچنت زیبال: <input name="zibal_merchant" value="' . esc_attr($s['zibal_merchant'] ?? '') . '" style="direction:ltr"> <small>(برای آزمایش: zibal)</small></p>
+             <p><label><input type="checkbox" name="allow_app_register" value="1" ' . checked($s['allow_app_register'] ?? '1', '1', false) . '> اجازهٔ ثبت‌نام مستقیم از داخل برنامهٔ دفترچی</label></p>
              <p>حداکثر تعداد انتقال هر لایسنس: <input type="number" min="0" name="max_transfers" value="' . (int)($s['max_transfers'] ?? 2) . '" style="width:70px"></p>
              <p><button class="button button-primary">ذخیره</button></p>');
         echo '<p>صفحهٔ پیشخوان مشتری: <a href="' . esc_url(accsoft_portal_url()) . '">' . esc_html(accsoft_portal_url()) . '</a> (شورت‌کد <code>[accsoft_dashboard]</code>)</p>';
@@ -181,7 +182,7 @@ add_action('admin_post_accsoft_lic_act', function () {
 
 add_action('admin_post_accsoft_save_settings', function () {
     accsoft_admin_guard('accsoft_save_settings');
-    accsoft_set_settings(['zibal_merchant' => preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_POST['zibal_merchant'] ?? '')), 'max_transfers' => max(0, (int)($_POST['max_transfers'] ?? 2))]);
+    accsoft_set_settings(['zibal_merchant' => preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_POST['zibal_merchant'] ?? '')), 'max_transfers' => max(0, (int)($_POST['max_transfers'] ?? 2)), 'allow_app_register' => !empty($_POST['allow_app_register']) ? '1' : '0']);
     accsoft_admin_back('settings', 'ذخیره شد');
 });
 add_action('admin_post_accsoft_newseed', function () {

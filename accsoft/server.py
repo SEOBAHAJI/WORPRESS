@@ -9,7 +9,7 @@ import urllib.parse
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, access, catalog, exports, jalali, licensing, plugins, security, services, sms, woo
+from . import __version__, access, account, catalog, exports, jalali, licensing, plugins, security, services, sms, woo
 from .config import LICENSE_PORTAL_PATH, WEBAKERY_BASE, data_dir, resource_dir
 from .services import AppError
 
@@ -49,23 +49,30 @@ class App:
                 c.session = None
             return {"version": __version__, "setup_needed": db.one("SELECT 1 FROM users") is None,
                     "logged_in": bool(c.session), "csrf": c.session["csrf"] if c.session else None,
-                    "user": user and {"id": user["id"], "username": user["username"], "full_name": user["full_name"],
+                    "user": user and {"id": user["id"], "username": user["username"], "full_name": user["full_name"], "account": user["account"],
                                       "role": user["role"], "perms": access.perms_of(user["role"])},
                     "roles": {k: v[0] for k, v in access.ROLES.items()}, "perms": access.PERMS,
                     "role_perms": {k: [access.PERMS[x] for x in sorted(v[1])] for k, v in access.ROLES.items()},
                     "plugins": self.plugins.listing(set(access.perms_of(user["role"])) if user else set()),
                     "license": lic, "shop_name": db.get("shop_name", ""), "usd_rate": services.usd_rate(db),
-                    "webakery": WEBAKERY_BASE, "today": jalali.to_jalali_str(date.today())}
+                    "webakery": WEBAKERY_BASE, "account_required": account.REQUIRED, "today": jalali.to_jalali_str(date.today())}
 
         @r("POST", "/api/setup", public=True)
         def setup(c):
             if db.one("SELECT 1 FROM users"):
                 raise AppError("نصب قبلاً انجام شده است")
             u, p = (c.body.get("username") or "").strip(), c.body.get("password") or ""
+            acc = ""
+            if account.REQUIRED:   # ابتدا حساب وبیکری: ورود یا ثبت‌نام؛ نام کاربری محلی = ایمیل حساب
+                u = (c.body.get("email") or "").strip().lower()
+                info = account.register(u, p, (c.body.get("name") or "").strip()) if c.body.get("mode") == "register" else account.login(u, p)
+                acc, u = info["email"].lower(), info["email"].lower()
+                self._pending_licenses = info.get("licenses", [])
             if len(u) < 3 or len(p) < 8:
                 raise AppError("نام کاربری حداقل ۳ و رمز حداقل ۸ نویسه باشد")
-            db.conn.execute("INSERT INTO users(username,pass_hash,role) VALUES(?,?,'admin')", (u, security.hash_password(p)))
+            db.conn.execute("INSERT INTO users(username,pass_hash,role,account) VALUES(?,?,'admin',?)", (u, security.hash_password(p), acc))
             db.set("shop_name", (c.body.get("shop_name") or "").strip())
+            self._take_licenses(getattr(self, "_pending_licenses", []))
             return self._login(c, u, p)
 
         @r("POST", "/api/login", public=True)
@@ -112,6 +119,28 @@ class App:
                 pass
             access.audit(db, u, "password.reset")
             return {"username": u["username"]}
+
+        @r("POST", "/api/open-url", public=True)
+        def open_url(c):
+            import webbrowser
+            url = account.URLS.get(c.body.get("to") or "")
+            if not url:
+                raise AppError("آدرس نامعتبر")
+            threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+            return {"url": url}
+
+        @r("POST", "/api/account/link")
+        def account_link(c):
+            email = (c.body.get("email") or "").strip().lower()
+            info = account.register(email, c.body.get("password") or "", (c.body.get("name") or "").strip()) if c.body.get("mode") == "register" \
+                else account.login(email, c.body.get("password") or "")
+            if db.one("SELECT 1 FROM users WHERE account=? AND id!=?", (info["email"].lower(), c.session["uid"])):
+                raise AppError("این حساب به کاربر دیگری وصل است")
+            db.conn.execute("UPDATE users SET account=?, pass_hash=? WHERE id=?",
+                            (info["email"].lower(), security.hash_password(c.body.get("password") or ""), c.session["uid"]))
+            self._take_licenses(info.get("licenses", []))
+            access.audit(db, c.user, "account.link", info["email"])
+            return {"account": info["email"].lower()}
 
         @r("POST", "/api/logout")
         def logout(c):
@@ -519,7 +548,7 @@ class App:
     def _user(self, session):
         if not session:
             return None
-        return self.db.one("SELECT id,username,full_name,role FROM users WHERE id=? AND active=1", (session["uid"],))
+        return self.db.one("SELECT id,username,full_name,role,account FROM users WHERE id=? AND active=1", (session["uid"],))
 
     def _login(self, c, user, pw):
         wait = self.sessions.locked(user)
@@ -528,6 +557,15 @@ class App:
         u = self.db.one("SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1", (user,))
         # حتی اگر کاربر وجود نداشت، هزینهٔ هش را بپردازیم تا زمان‌بندی چیزی لو ندهد
         ok = security.check_password(pw, u["pass_hash"] if u else security.hash_password("x"))
+        if u and not ok and u["account"] and account.REQUIRED:
+            # رمز در سایت وبیکری عوض شده (بازیابی رمز از سایت)؟ با حساب آنلاین تأیید و رمز محلی همگام می‌شود
+            try:
+                info = account.login(u["account"], pw)
+                self.db.conn.execute("UPDATE users SET pass_hash=? WHERE id=?", (security.hash_password(pw), u["id"]))
+                self._take_licenses(info.get("licenses", []))
+                ok = True
+            except AppError:
+                pass
         if not (u and ok):
             self.sessions.fail(user)
             raise AppError("نام کاربری یا رمز عبور نادرست است")
@@ -536,6 +574,16 @@ class App:
         sid, csrf = self.sessions.create(u["id"])
         c.cookie = f"sid={sid}; Path=/; HttpOnly; SameSite=Strict"
         return {"csrf": csrf}
+
+    def _take_licenses(self, keys):
+        """لایسنس‌های حساب (اگر برای همین سیستم صادر شده باشند) به‌صورت خودکار فعال می‌شوند."""
+        for k in keys or []:
+            try:
+                licensing.activate(self.db, k)
+            except Exception:
+                pass
+        if keys:
+            self.plugins.reload()
 
     def _welcome(self, cid):
         if self.db.get("welcome_enabled", "0") != "1":

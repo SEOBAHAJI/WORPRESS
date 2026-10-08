@@ -2,6 +2,7 @@ import os
 import tempfile
 import threading
 
+os.environ.setdefault("ACCSOFT_NO_ACCOUNT", "1")  # تست‌ها بدون حساب آنلاین
 os.environ.setdefault("ACCSOFT_DATA", tempfile.mkdtemp(prefix="accsoft-test-"))
 
 from accsoft import ed25519, pubkey  # noqa: E402

@@ -61,8 +61,16 @@ function authBox(title, extra, btn, fn, setup) {
 const loginView = () => {
   authBox('ورود', '', 'ورود', (u, p) => api('POST', '/api/login', { username: u, password: p }));
   $('.center').insertAdjacentHTML('beforeend', '<p><a id="fg" style="cursor:pointer;color:var(--pri)">رمز عبور را فراموش کرده‌ام</a></p>');
-  $('#fg').onclick = resetView;
+  $('#fg').onclick = () => { S.account_required ? forgotView() : resetView(); };
 };
+function forgotView() {
+  $('#app').innerHTML = h`<div class="center card"><h2>فراموشی رمز</h2>
+    <p><b>روش پیشنهادی:</b> رمز را در سایت webakery.ir بازیابی کنید (لینک به ایمیل شما می‌آید). بعد همین‌جا با رمز جدید وارد شوید؛ برنامه رمز را خودش همگام می‌کند (اینترنت لازم است).</p>
+    <p><button id="fs">باز کردن صفحهٔ بازیابی رمز در سایت</button></p>
+    <p class="mut">اگر اینترنت ندارید یا حساب سایت ندارید:</p><p><button class="sec" id="fl">بازیابی با کد روی همین کامپیوتر</button> <button class="sec" id="fb">بازگشت</button></p></div>`.s;
+  $('#fs').onclick = () => run(() => api('POST', '/api/open-url', { to: 'forgot' }), 'صفحهٔ بازیابی در مرورگر باز شد');
+  $('#fl').onclick = resetView; $('#fb').onclick = loginView;
+}
 function resetView() {
   $('#app').innerHTML = h`<div class="center card"><h2>بازیابی رمز عبور</h2>
     <p class="mut">۱) «ساخت کد» را بزنید تا یک فایل کد در پوشهٔ داده‌های برنامه ساخته شود (فقط کسی که به این کامپیوتر دسترسی دارد می‌تواند آن را بخواند).</p>
@@ -76,9 +84,30 @@ function resetView() {
   $('#rb').onclick = loginView;
 }
 function setupView() {
-  authBox('نصب اولیه', field('نام فروشگاه', h`<input id="shop" style="width:100%">`) , 'ایجاد حساب مدیر',
-    (u, p) => api('POST', '/api/setup', { username: u, password: p, shop_name: $('#shop').value }), true);
-  $('.center').insertAdjacentHTML('beforeend', '<p class="mut">رمز حداقل ۸ نویسه. آن را فراموش نکنید؛ بازیابی ندارد.</p>');
+  if (!S.account_required) {
+    authBox('نصب اولیه', field('نام فروشگاه', h`<input id="shop" style="width:100%">`), 'ایجاد حساب مدیر',
+      (u, p) => api('POST', '/api/setup', { username: u, password: p, shop_name: $('#shop').value }));
+    $('.center').insertAdjacentHTML('beforeend', '<p class="mut">رمز حداقل ۸ نویسه. آن را فراموش نکنید؛ بازیابی ندارد.</p>');
+    return;
+  }
+  let mode = 'login';
+  const draw = () => {
+    $('#app').innerHTML = h`<div class="center card"><h2>به دفترچی خوش آمدید</h2>
+      <p class="mut">برای استفاده از برنامه به یک حساب در webakery.ir نیاز دارید. اگر حساب دارید وارد شوید، وگرنه همین‌جا بسازید (به اینترنت نیاز است).</p>
+      <div class="row"><button class="${mode === 'login' ? '' : 'sec'}" id="m1">ورود با حساب</button><button class="${mode === 'register' ? '' : 'sec'}" id="m2">ساخت حساب جدید</button></div>
+      ${mode === 'register' ? field('نام شما', h`<input id="nm" style="width:100%">`) : ''}
+      ${field('نام فروشگاه', h`<input id="shop" style="width:100%">`)}
+      ${field('ایمیل', h`<input id="em" type="email" style="width:100%;direction:ltr" autocomplete="username">`)}
+      ${field(mode === 'register' ? 'رمز عبور (حداقل ۸ نویسه)' : 'رمز عبور', h`<input id="pw" type="password" style="width:100%" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}">`)}
+      <p><button id="go">${mode === 'register' ? 'ساخت حساب و ادامه' : 'ورود و ادامه'}</button></p>
+      <p><a id="fg" style="cursor:pointer;color:var(--pri)">رمز عبور را فراموش کرده‌ام (بازیابی از سایت)</a></p></div>`.s;
+    $('#m1').onclick = () => { mode = 'login'; draw(); }; $('#m2').onclick = () => { mode = 'register'; draw(); };
+    $('#fg').onclick = () => run(() => api('POST', '/api/open-url', { to: 'forgot' }), 'صفحهٔ بازیابی رمز در مرورگر باز شد');
+    $('#pw').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
+    $('#go').onclick = () => run(async () => {
+      await api('POST', '/api/setup', { mode, email: $('#em').value, password: $('#pw').value, name: $('#nm')?.value || '', shop_name: $('#shop').value }); await boot(); });
+  };
+  draw();
 }
 
 // ---------- چارچوب ----------
@@ -95,12 +124,13 @@ function go(page) {
   location.hash = page;
   const L = S.license, [title, fn] = plug ? [plug.menu.title, el => { el.innerHTML = ''; const f = document.createElement('iframe');
     f.src = `/plugin/${plug.id}/${plug.menu.page}`; f.style.cssText = 'width:100%;height:78vh;border:0;background:#fff'; el.append(f); }] : PAGES[page];
+  const unlinked = S.account_required && !S.user.account ? h`<div class="banner">حساب webakery.ir به این کاربر متصل نیست (برای بازیابی رمز و لایسنس لازم است). <a href="#settings" style="color:inherit">اتصال حساب</a></div>` : '';
   const banner = L.mode === 'trial' ? h`<div class="banner">دورهٔ آزمایشی: ${L.days_left} روز باقی مانده. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>`
     : L.mode === 'expired' ? h`<div class="banner bad">${L.tampered ? 'ساعت سیستم دستکاری شده است.' : (L.license_error || 'لایسنس معتبر نیست.')} فقط مشاهده و خروجی فعال است. <a href="#license" style="color:inherit">تهیهٔ لایسنس</a></div>` : '';
   const menu = [...visiblePages().map(([k, [t]]) => [k, t]), ...S.plugins.filter(p => p.menu).map(p => ['plugin:' + p.id, p.menu.title])];
   $('#app').innerHTML = h`<div class="layout"><nav class="side"><h1>${S.shop_name || 'دفترچی'}</h1>
     ${menu.map(([k, t]) => h`<a data-p="${k}" class="${k === page ? 'on' : ''}">${t}</a>`)}
-    <a id="out">خروج (${S.user.username})</a></nav><main class="main">${banner}<div class="top"><h2>${title}</h2>
+    <a id="out">خروج (${S.user.username})</a></nav><main class="main">${unlinked}${banner}<div class="top"><h2>${title}</h2>
     ${HELP[page] ? h`<button class="sec" id="hlp">؟ راهنما</button>` : ''}</div><div id="page"></div></main></div>`.s;
   document.querySelectorAll('.side a[data-p]').forEach(a => a.onclick = () => go(a.dataset.p));
   $('#out').onclick = async () => { await api('POST', '/api/logout', {}); boot(); };
@@ -406,6 +436,7 @@ async function pSettings(el) {
   const sel = (k, label, opts) => field(label, h`<select data-k="${k}">${opts.map(([v, t]) => h`<option value="${v}" ${s[k] === v ? raw('selected') : ''}>${t}</option>`)}</select>`);
   render(el, h`<div class="card"><h3>فروشگاه و ارز</h3><div class="grid">${inp('shop_name', 'نام فروشگاه')}${inp('shop_phone', 'تلفن')}${inp('shop_address', 'آدرس')}
     ${inp('invoice_footer', 'متن پایین فاکتور')}${inp('usd_rate', 'نرخ دلار (تومان)')}</div>${sw('allow_negative_stock', 'اجازهٔ فروش با موجودی صفر')}</div>
+    ${S.account_required ? h`<div class="card"><h3>حساب webakery.ir</h3>${S.user.account ? h`<p>متصل به: <b dir="ltr">${S.user.account}</b></p>` : h`<p>این کاربر به حساب سایت متصل نیست. با اتصال، می‌توانید رمز را از سایت بازیابی کنید و لایسنس‌های حساب خودکار فعال می‌شوند.</p><div class="row">${field('ایمیل حساب', h`<input id="lk_e" style="direction:ltr">`)}${field('رمز حساب', h`<input id="lk_p" type="password">`)}<button id="lk">اتصال حساب</button></div>`}</div>` : ''}
     <div class="card"><h3>ووکامرس</h3><p>اتصال و همگام‌سازی از صفحهٔ <a href="#woo">ووکامرس</a> انجام می‌شود.</p></div>
     <div class="card"><h3>پیامک خوش‌آمدگویی</h3>${sw('welcome_enabled', 'ارسال پیام به مشتری جدید')}<div class="grid">
     ${sel('sms_provider', 'پنل', [['none', 'غیرفعال'], ['kavenegar', 'کاوه‌نگار'], ['custom', 'سفارشی (URL)']])}${inp('sms_apikey', 'کلید API', 'type="password" autocomplete="off"')}${inp('sms_sender', 'شمارهٔ فرستنده')}
@@ -418,6 +449,7 @@ async function pSettings(el) {
     const b = {}; el.querySelectorAll('[data-k]').forEach(i => b[i.dataset.k] = i.type === 'checkbox' ? (i.checked ? '1' : '0') : i.value);
     await api('PUT', '/api/settings', b); S = await (await fetch('/api/state')).json(); csrf = S.csrf;
   }, 'ذخیره شد');
+  if ($('#lk')) $('#lk').onclick = () => run(async () => { await api('POST', '/api/account/link', { email: $('#lk_e').value, password: $('#lk_p').value }); S = await (await fetch('/api/state')).json(); csrf = S.csrf; pSettings(el); }, 'حساب متصل شد');
   $('#tst').onclick = () => run(async () => { const r = await api('POST', '/api/sms/test', { phone: $('#tp').value }); toast(r.ok ? 'ارسال شد' : 'ناموفق: ' + r.detail, !r.ok); });
   $('#pc').onclick = () => run(() => api('POST', '/api/password', { old: $('#po').value, new: $('#pn').value }), 'رمز تغییر کرد');
 }

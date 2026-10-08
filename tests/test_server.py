@@ -186,3 +186,62 @@ class ResetTests(unittest.TestCase):
         c2 = Client(srv.app.port)
         self.assertEqual(c2.call("POST", "/api/login", {"username": "boss", "password": "Abcdef123"})[0], 400)
         self.assertEqual(c2.call("POST", "/api/reset/confirm", {"code": code, "password": "Another123"})[0], 400)   # یک‌بار مصرف
+
+
+class AccountTests(unittest.TestCase):
+    """ورود/ثبت‌نام با حساب وبیکری؛ سرور وبیکری با monkeypatch شبیه‌سازی می‌شود."""
+
+    def setUp(self):
+        from unittest import mock
+        from accsoft import account
+        self.site_pw = {"u@x.ir": "SitePass123"}   # «پایگاه کاربران» سایت
+
+        def fake_post(path, body):
+            from accsoft.services import AppError
+            if path == "/register":
+                if body["email"] in self.site_pw:
+                    raise AppError("با این ایمیل قبلاً حساب ساخته شده")
+                self.site_pw[body["email"]] = body["password"]
+                return {"ok": True, "email": body["email"], "name": body["name"], "licenses": []}
+            if self.site_pw.get(body["login"].lower()) != body["password"]:
+                raise AppError("ایمیل/نام کاربری یا رمز نادرست است")
+            return {"ok": True, "email": body["login"].lower(), "name": "n", "licenses": []}
+        self.patches = [mock.patch.object(account, "REQUIRED", True), mock.patch.object(account, "_post", fake_post)]
+        for p in self.patches:
+            p.start()
+        self.db = fresh_db()
+        self.srv = create_server(self.db)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.port = self.srv.app.port
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def test_setup_requires_site_account_and_password_syncs_from_site(self):
+        c = Client(self.port)
+        self.assertTrue(c.call("GET", "/api/state")[1]["account_required"])
+        self.assertEqual(c.call("POST", "/api/setup", {"mode": "login", "email": "u@x.ir", "password": "wrong-pass1", "shop_name": "s"})[0], 400)
+        st, _, _ = c.call("POST", "/api/setup", {"mode": "login", "email": "U@x.ir", "password": "SitePass123", "shop_name": "s"})
+        self.assertEqual(st, 200)
+        u = self.db.one("SELECT username,account FROM users")
+        self.assertEqual((u["username"], u["account"]), ("u@x.ir", "u@x.ir"))
+        # رمز در سایت عوض می‌شود → ورود با رمز جدید (تأیید آنلاین) و رمز محلی همگام می‌شود
+        c.call("POST", "/api/logout", {})
+        self.site_pw["u@x.ir"] = "BrandNew456"
+        c2 = Client(self.port)
+        self.assertEqual(c2.call("POST", "/api/login", {"username": "u@x.ir", "password": "BrandNew456"})[0], 200)
+        self.assertEqual(Client(self.port).call("POST", "/api/login", {"username": "u@x.ir", "password": "SitePass123"})[0], 400)   # رمز قدیمی دیگر کار نمی‌کند
+
+    def test_register_and_link(self):
+        c = Client(self.port)
+        st, _, _ = c.call("POST", "/api/setup", {"mode": "register", "email": "new@x.ir", "password": "Abcdef123", "name": "علی", "shop_name": "s"})
+        self.assertEqual(st, 200)
+        self.assertIn("new@x.ir", self.site_pw)
+        dup = Client(self.port).call("POST", "/api/setup", {"mode": "register", "email": "u@x.ir", "password": "Abcdef123"})
+        self.assertEqual(dup[0], 400)   # قبلاً حساب دارد / نصب انجام شده
+        c.csrf = c.call("GET", "/api/state")[1]["csrf"]
+        st, d, _ = c.call("POST", "/api/account/link", {"email": "u@x.ir", "password": "SitePass123"})
+        self.assertEqual((st, d["account"]), (200, "u@x.ir"))
