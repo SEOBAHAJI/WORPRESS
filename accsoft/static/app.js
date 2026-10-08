@@ -1,4 +1,4 @@
-﻿window.addEventListener('error', function(e) { document.body.innerHTML += '<div style="color:red;padding:20px;font-size:20px;z-index:9999;position:relative;background:white;">' + e.message + '<br>' + e.filename + ':' + e.lineno + '</div>'; });
+﻿
 'use strict';
 // ---------- ابزارها ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -334,8 +334,6 @@ function donut(parts) {
 }
 const hbars = (rows, key) => { const m = Math.max(1, ...rows.map(r => r[key])); return rows.map(r => `<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(r.name)}</span><b>${money(r[key])}</b></div>
   <div style="background:var(--line);border-radius:5px;height:9px"><div style="width:${Math.max(2, Math.round(100 * r[key] / m))}%;background:var(--pri);height:9px;border-radius:5px"></div></div></div>`).join(''); };
-
-async 
 async function pInstallments(el) {
   render(el, h`<div class="card"><div class="row"><h3>اقساط</h3></div><div id="t"></div></div>`);
   const load = () => run(async () => {
