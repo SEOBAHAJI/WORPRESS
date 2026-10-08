@@ -483,7 +483,7 @@ class App:
         wait = self.sessions.locked(user)
         if wait:
             raise AppError(f"به‌خاطر تلاش‌های ناموفق، {wait} ثانیه صبر کنید")
-        u = self.db.one("SELECT * FROM users WHERE username=? AND active=1", (user,))
+        u = self.db.one("SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1", (user,))
         # حتی اگر کاربر وجود نداشت، هزینهٔ هش را بپردازیم تا زمان‌بندی چیزی لو ندهد
         ok = security.check_password(pw, u["pass_hash"] if u else security.hash_password("x"))
         if not (u and ok):
