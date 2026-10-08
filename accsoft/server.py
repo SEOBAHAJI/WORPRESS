@@ -1,4 +1,4 @@
-"""سرور HTTP محلی فقط روی 127.0.0.1 با احراز هویت، CSRF، بررسی Host/Origin و قفل لایسنس."""
+﻿"""سرور HTTP محلی فقط روی 127.0.0.1 با احراز هویت، CSRF، بررسی Host/Origin و قفل لایسنس."""
 import base64
 import json
 import mimetypes
@@ -15,8 +15,8 @@ from .services import AppError
 
 SECRET_KEYS = {"woo_key", "woo_secret", "sms_apikey", "wp_app_password"}
 PLAIN_KEYS = {"wp_user", "shop_name", "shop_phone", "shop_address", "invoice_footer", "usd_rate", "woo_url", "woo_unit",
-              "woo_allow_http", "woo_orders_decrement", "sms_provider", "sms_sender", "sms_url", "sms_method",
-              "welcome_enabled", "welcome_text", "allow_negative_stock"}
+              "woo_allow_http", "woo_orders_decrement", "sms_provider", "sms_sender", "sms_username", "sms_url", "sms_method",
+              "welcome_enabled", "welcome_text", "allow_negative_stock", "sms_on_sale", "sms_on_installment"}
 MAX_BODY = 6 * 1024 * 1024
 WRITE_OK_WHEN_LOCKED = ("/api/license", "/api/catalog", "/api/logout", "/api/password")
 
@@ -351,12 +351,46 @@ class App:
         def sms_log(c):
             return db.q("SELECT * FROM sms_log ORDER BY id DESC LIMIT 100")
 
+        @r("POST", "/api/sms/send-bulk")
+        def sms_bulk(c):
+            text, phones = c.body.get("text"), c.body.get("phones") or []
+            if not text or not phones:
+                raise AppError("متن و گیرندگان الزامی است")
+            def _send_all():
+                for p in phones:
+                    sms.send(db, p, text)
+            threading.Thread(target=_send_all, daemon=True).start()
+            return {"queued": len(phones)}
+
+        @r("GET", "/api/installments")
+        def get_insts(c):
+            return db.q("SELECT i.*, s.number as sale_number, c.first_name, c.last_name, c.phone "
+                        "FROM installments i JOIN sales s ON s.id=i.sale_id JOIN customers c ON c.id=s.customer_id "
+                        "WHERE i.paid < i.amount ORDER BY i.due_date ASC")
+
+        @r("POST", r"/api/installments/(\d+)/remind")
+        def remind_inst(c, iid):
+            i = db.one("SELECT i.*, s.number as sale_number, c.first_name, c.phone FROM installments i "
+                       "JOIN sales s ON s.id=i.sale_id JOIN customers c ON c.id=s.customer_id WHERE i.id=?", (int(iid),))
+            if not i or not i["phone"]:
+                raise AppError("مشتری یا موبایل یافت نشد")
+            txt = f"{i['first_name']} عزیز، موعد پرداخت قسط فاکتور {i['sale_number']} به مبلغ {i['amount']-i['paid']} تومان در تاریخ {i['due_date']} می‌باشد.\n{db.get('shop_name', '')}"
+            ok, detail = sms.send(db, i["phone"], txt)
+            return {"ok": ok, "detail": detail}
+
+        @r("POST", r"/api/installments/(\d+)/pay")
+        def pay_inst(c, iid):
+            amt = int(services._num(c.body.get("amount", 0), "مبلغ"))
+            with db.tx() as cx:
+                cx.execute("UPDATE installments SET paid=paid+? WHERE id=?", (amt, int(iid)))
+            return {}
+
         # ----- فروش -----
         @r("POST", "/api/sales")
         def new_sale(c):
             res = services.create_sale(db, c.body.get("items") or [], c.body.get("customer"), c.body.get("discount", 0),
                                        c.body.get("pay_method", "cash"), c.body.get("note", ""), channel="offline",
-                                       user_id=c.user["id"], paid=c.body.get("paid"))
+                                       user_id=c.user["id"], paid=c.body.get("paid"), installments=c.body.get("installments"))
             if res["new_customer"]:
                 self._welcome(res["new_customer"])
             return res
@@ -631,7 +665,7 @@ def make_handler(app: App):
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Security-Policy", csp or
-                             "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+                             "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()

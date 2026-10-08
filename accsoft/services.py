@@ -199,7 +199,7 @@ def upsert_customer(db, first, last, phone, conn=None):
 # ---------- فروش ----------
 def create_sale(db, items, customer=None, discount=0, pay_method="cash", note="",
                 channel="offline", created_at=None, woo_order_id=None, decrement_stock=True,
-                total_override=None, user_id=None, paid=None):
+                total_override=None, user_id=None, paid=None, installments=None):
     if not items:
         raise AppError("فاکتور خالی است")
     allow_neg = db.get("allow_negative_stock", "0") == "1"
@@ -252,6 +252,17 @@ def create_sale(db, items, customer=None, discount=0, pay_method="cash", note=""
                       (sid, pid, name, qty, unit, cost))
             if pid and decrement_stock:
                 adjust_stock(db, pid, -qty, "sale", ref=number, conn=c, allow_negative=allow_neg or channel == "online")
+        if installments:
+            for inst in installments:
+                c.execute("INSERT INTO installments(sale_id,due_date,amount) VALUES(?,?,?)",
+                          (sid, inst.get("due_date", ""), int(_num(inst.get("amount", 0), "مبلغ قسط"))))
+
+    if customer and customer.get("phone") and db.get("sms_on_sale", "0") == "1":
+        import threading
+        from . import sms
+        txt = f"فاکتور {number} به مبلغ {total} تومان ثبت شد.\n{db.get('shop_name', 'فروشگاه')}"
+        threading.Thread(target=sms.send, args=(db, customer["phone"], txt), daemon=True).start()
+
     return {"id": sid, "number": number, "new_customer": cid if is_new else None}
 
 

@@ -1,6 +1,6 @@
 :root{--bg:#f4f6fa;--card:#fff;--ink:#1c2333;--mut:#6b7488;--pri:#2563eb;--pri2:#1d4ed8;--ok:#16a34a;--bad:#dc2626;--line:#e3e7ef}
 @media(prefers-color-scheme:dark){:root{--bg:#10141c;--card:#1a2030;--ink:#e6e9f2;--mut:#98a2b8;--line:#2a3247}}
-*{box-sizing:border-box}body{margin:0;font-family:Tahoma,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+*{box-sizing:border-box}body{margin:0;font-family:Vazirmatn,Tahoma,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
 .layout{display:flex;min-height:100vh}.side{width:200px;background:var(--card);border-left:1px solid var(--line);padding:12px 8px;position:sticky;top:0;height:100vh;overflow:auto}
 .side h1{font-size:15px;margin:4px 8px 12px}.side a{display:block;padding:9px 12px;border-radius:8px;color:var(--ink);text-decoration:none;cursor:pointer;margin-bottom:2px}
 .side a.on,.side a:hover{background:var(--pri);color:#fff}.main{flex:1;padding:18px;min-width:0}

@@ -1,3 +1,4 @@
+﻿window.addEventListener('error', function(e) { document.body.innerHTML += '<div style="color:red;padding:20px;font-size:20px;z-index:9999;position:relative;background:white;">' + e.message + '<br>' + e.filename + ':' + e.lineno + '</div>'; });
 'use strict';
 // ---------- ابزارها ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -112,7 +113,7 @@ function setupView() {
 
 // ---------- چارچوب ----------
 const PAGES = { dashboard: ['داشبورد', pDashboard, 'reports'], pos: ['فروش حضوری', pPos, 'sell'], sales: ['فاکتورها', pSales, 'sales_view'],
-  products: ['محصولات', pProducts, 'products_view'], inventory: ['انبار', pInventory, 'inventory'], customers: ['مشتریان', pCustomers, 'customers'],
+  products: ['محصولات', pProducts, 'products_view'], inventory: ['انبار', pInventory, 'inventory'], customers: ['مشتریان', pCustomers, 'customers'], installments: ['اقساط', pInstallments, 'sales_view'],
   purchases: ['خرید و تأمین‌کنندگان', pPurchases, 'purchases'], accounts: ['حساب‌ها (بدهکار/بستانکار)', pAccounts, 'finance'],
   reports: ['گزارش‌ها', pReports, 'reports'], expenses: ['هزینه‌ها', pExpenses, 'finance'], woo: ['ووکامرس', pWoo, 'woo'],
   users: ['کاربران', pUsers, 'users'], settings: ['تنظیمات', pSettings, 'settings'], license: ['لایسنس و افزونه‌ها', pLicense, 'settings'] };
@@ -223,7 +224,7 @@ async function pProducts(el) {
   const sel = new Set();
   render(el, h`<div class="card"><div class="row"><input id="q" class="grow" placeholder="جست‌وجو..."><button id="add">+ محصول جدید</button>
     <button class="sec" id="bulk">تغییر گروهی قیمت</button><a class="btn sec" href="/export/products.xlsx">Excel</a>
-    <button class="sec" id="prt">PDF</button></div><p class="mut">نرخ دلار فعلی: ${S.usd_rate ? money(S.usd_rate) + ' تومان' : 'تنظیم نشده'}</p><div id="t"></div></div>`);
+    <button class="sec" id="prt">PDF</button><button class="ok" id="pushtowoo">ارسال قیمت‌ها به سایت</button></div><p class="mut">نرخ دلار فعلی: ${S.usd_rate ? money(S.usd_rate) + ' تومان' : 'تنظیم نشده'}</p><div id="t"></div></div>`);
   const load = () => run(async () => {
     const rows = await api('GET', '/api/products?q=' + encodeURIComponent($('#q').value));
     $('#t').innerHTML = h`<table><tr><th><input type="checkbox" id="all"></th><th></th><th>نام</th><th>کد</th><th>قیمت (تومان)</th><th>خرید</th><th>موجودی</th><th></th></tr>
@@ -239,7 +240,7 @@ async function pProducts(el) {
     $('#t').querySelectorAll('[data-x]').forEach(b => b.onclick = () => confirm('محصول حذف شود؟') && run(async () => { await api('DELETE', '/api/products/' + b.dataset.x); load(); }));
     $('#t').querySelectorAll('[data-img]').forEach(i => i.onclick = () => pickImage(i.dataset.img, load));
   });
-  $('#q').oninput = load; $('#add').onclick = () => editProduct(null, load); $('#prt').onclick = () => showPrint('/print/products');
+  $('#q').oninput = load; $('#add').onclick = () => editProduct(null, load); $('#prt').onclick = () => showPrint('/print/products'); $('#pushtowoo').onclick = () => run(async () => { await api('POST', '/api/woo/push-products', {}); toast('ارسال شد'); load(); });
   $('#bulk').onclick = () => bulkPrice([...sel], load); load();
 }
 function pickImage(id, done) {
@@ -295,7 +296,7 @@ async function pInventory(el) {
 
 // ---------- مشتریان ----------
 async function pCustomers(el) {
-  render(el, h`<div class="card"><div class="row"><input id="q" class="grow" placeholder="جست‌وجو (نام/موبایل)"><button id="add">+ مشتری</button><a class="btn sec" href="/export/customers.xlsx">Excel</a></div><div id="t"></div></div>`);
+  render(el, h`<div class="card"><div class="row"><input id="q" class="grow" placeholder="جست‌وجو (نام/موبایل)"><button id="add">+ مشتری</button><a class="btn sec" href="/export/customers.xlsx">Excel</a><button class="sec" id="sms">پیامک گروهی</button></div><div id="t"></div></div>`);
   const load = () => run(async () => {
     const rows = await api('GET', '/api/customers?q=' + encodeURIComponent($('#q').value));
     $('#t').innerHTML = h`<table><tr><th>نام</th><th>موبایل</th><th>تعداد خرید</th><th>جمع خرید</th><th>مانده بدهی</th><th>خوش‌آمد</th></tr>
@@ -304,7 +305,7 @@ async function pCustomers(el) {
   $('#q').oninput = load; load();
   $('#add').onclick = () => { const m = modal(h`<h3>مشتری جدید</h3><div class="row">${field('موبایل', h`<input id="p" placeholder="09...">`)}${field('نام', h`<input id="f">`)}${field('نام خانوادگی', h`<input id="l">`)}</div>
     <p><button id="ok">ثبت</button> <button class="sec" data-close>انصراف</button></p>`);
-    $('#ok', m.box).onclick = () => run(async () => { await api('POST', '/api/customers', { phone: $('#p', m.box).value, first_name: $('#f', m.box).value, last_name: $('#l', m.box).value }); m.close(); load(); }, 'ثبت شد'); };
+    $('#ok', m.box).onclick = () => run(async () => { await api('POST', '/api/customers', { phone: $('#p', m.box).value, first_name: $('#f', m.box).value, last_name: $('#l', m.box).value }); m.close(); load(); }, 'ثبت شد'); }; $('#sms').onclick = () => { const m = modal(h`<h3>ارسال پیامک دسته‌جمعی</h3><textarea id="txt" rows="4" style="width:100%" placeholder="متن..."></textarea><p><button id="send">ارسال</button> <button class="sec" data-close>انصراف</button></p>`); $('#send', m.box).onclick = () => run(async () => { const phones = Array.from(document.querySelectorAll('#t td[dir="ltr"]')).map(td => td.textContent).filter(x => x); await api('POST', '/api/sms/send-bulk', { text: $('#txt', m.box).value, phones }); m.close(); toast('شروع شد'); }); };
 }
 
 // ---------- گزارش‌ها ----------
@@ -334,7 +335,29 @@ function donut(parts) {
 const hbars = (rows, key) => { const m = Math.max(1, ...rows.map(r => r[key])); return rows.map(r => `<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(r.name)}</span><b>${money(r[key])}</b></div>
   <div style="background:var(--line);border-radius:5px;height:9px"><div style="width:${Math.max(2, Math.round(100 * r[key] / m))}%;background:var(--pri);height:9px;border-radius:5px"></div></div></div>`).join(''); };
 
-async function pReports(el) {
+async 
+async function pInstallments(el) {
+  render(el, h`<div class="card"><div class="row"><h3>اقساط</h3></div><div id="t"></div></div>`);
+  const load = () => run(async () => {
+    const rows = await api('GET', '/api/installments');
+    $('#t').innerHTML = h`<table><tr><th>فاکتور</th><th>مشتری</th><th>موبایل</th><th>سررسید</th><th>مبلغ</th><th>پرداخت شده</th><th>باقی‌مانده</th><th>عملیات</th></tr>
+      ${rows.map(i => h`<tr><td>${i.sale_number}</td><td>${i.first_name} ${i.last_name||''}</td><td dir="ltr">${i.phone}</td>
+      <td><span class="badge ${i.due_date < new Date().toLocaleDateString('fa-IR','en-US').replace(/\//g,'/') ? 'off' : 'on'}">${i.due_date}</span></td>
+      <td>${money(i.amount)}</td><td>${money(i.paid)}</td><td class="neg">${money(i.amount - i.paid)}</td>
+      <td>
+        <button class="sec remind-btn" data-id="${i.id}">یادآوری</button>
+        <button class="ok pay-btn" data-id="${i.id}">پرداخت</button>
+      </td></tr>`)}</table>`.s;
+    document.querySelectorAll('.remind-btn').forEach(b => b.onclick = () => run(async () => { await api('POST', '/api/installments/'+b.dataset.id+'/remind'); toast('ارسال شد'); }));
+    document.querySelectorAll('.pay-btn').forEach(b => b.onclick = () => {
+      const amt = prompt('مبلغ پرداختی:');
+      if(amt) run(async () => { await api('POST', '/api/installments/'+b.dataset.id+'/pay', {amount: parseInt(faNum(amt))}); load(); toast('ثبت شد'); });
+    });
+  });
+  load();
+}
+
+function pReports(el) {
   const jy0 = +S.today.split('/')[0]; let year = jy0, mode = 'year';
   render(el, h`<div class="card"><div class="row">
     <button class="sec" data-m="year" id="my">📅 سالانه / ماهانه</button><button class="sec" data-m="range" id="mr">📆 بازهٔ دلخواه</button>

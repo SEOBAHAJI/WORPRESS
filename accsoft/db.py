@@ -82,7 +82,13 @@ MIGRATIONS = [
     INSERT INTO licenses(product,key) SELECT 'accsoft', value FROM settings WHERE key='license_key' AND value!='';
     DELETE FROM settings WHERE key='license_key';
     """,
-    "ALTER TABLE users ADD COLUMN account TEXT NOT NULL DEFAULT ''"
+    "ALTER TABLE users ADD COLUMN account TEXT NOT NULL DEFAULT ''",
+    """
+    CREATE TABLE IF NOT EXISTS installments(
+      id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      due_date TEXT NOT NULL, amount INTEGER NOT NULL, paid INTEGER NOT NULL DEFAULT 0,
+      note TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+    """
 ]
 
 
