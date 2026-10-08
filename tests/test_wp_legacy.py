@@ -141,3 +141,34 @@ class Upload(unittest.TestCase):
         for files in ({"../evil.php": "x"}, {"a/a.php": "<?php // no header", }, {"a/a.php": self.PLUG % "1", "b/b.php": "x"}, {"a/a.php": "<?php\n/* Plugin Name: X */"}):
             r = json.loads(self.php("ingest", {"zip": self.mkzip("x.zip", files), "opts": self.opts}))
             self.assertIn("error", r, files)
+
+    def test_injected_engine_gate_and_plans(self):
+        import zipfile
+        src = self.PLUG % "2.0.0" + "namespace My\\Plug;\nadd_action('init', function(){});\n"
+        z = self.mkzip("n.zip", {"my-plugin/my-plugin.php": src, "my-plugin/readme.txt": "x"})
+        r = json.loads(self.php("ingest", {"zip": z, "opts": self.opts, "o": {"plans_text": "m1|ماهانه|1|150,000\nlife|دائمی|0|2500000"}}))
+        self.assertTrue(r["injected"], r)
+        zf = zipfile.ZipFile(next((self.tmp / "up" / "accsoft-updates").glob("*.zip")))
+        self.assertIn("my-plugin/wb-license-client.php", zf.namelist())
+        main = zf.read("my-plugin/my-plugin.php").decode()
+        self.assertIn("WB_License_Client", main)
+        self.assertIn("is_active()", main)
+        self.assertLess(main.index("namespace My"), main.index("WB_License_Client"))   # بعد از namespace، نه قبلش
+        out = self.tmp / "x"
+        zf.extractall(out)
+        lint = subprocess.run([PHP, "-l", str(out / "my-plugin" / "my-plugin.php")], capture_output=True, text=True)
+        self.assertIn("No syntax errors", lint.stdout + lint.stderr)
+        plans = json.loads(self.php("sql", {"q": "SELECT 1 x"}))   # فقط سالم بودن هارنس
+        self.assertTrue(plans)
+
+    def test_no_gate_and_brace_namespace_and_existing_engine(self):
+        import zipfile
+        r = json.loads(self.php("ingest", {"zip": self.mkzip("a.zip", {"p-a/p-a.php": self.PLUG % "1.0"}), "opts": self.opts, "o": {"gate": False}}))
+        main = zipfile.ZipFile(next((self.tmp / "up" / "accsoft-updates").glob("p-a-*.zip"))).read("p-a/p-a.php").decode()
+        self.assertTrue(r["injected"] and "is_active()" not in main)
+        e = json.loads(self.php("ingest", {"zip": self.mkzip("b.zip", {"p-b/p-b.php": self.PLUG % "1.0" + "namespace X {\n}\n"}), "opts": self.opts}))
+        self.assertIn("namespace", e["error"])
+        c = json.loads(self.php("ingest", {"zip": self.mkzip("c.zip", {"p-c/p-c.php": self.PLUG % "1.0" + "require 'x'; new WB_License_Client([]);"}), "opts": self.opts}))
+        self.assertFalse(c["injected"])
+        bad = json.loads(self.php("ingest", {"zip": self.mkzip("d.zip", {"p-d/p-d.php": self.PLUG % "1.0"}), "opts": self.opts, "o": {"plans_text": "bad line"}}))
+        self.assertIn("پلن", bad["error"])

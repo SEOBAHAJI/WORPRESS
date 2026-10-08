@@ -24,6 +24,7 @@ function wp_remote_post($url, $a) {
     return ['b' => ['result' => 100, 'amount' => $GLOBALS['O']['zibal_amount'] ?? 0]];
 }
 function wp_upload_dir() { return ['basedir' => $GLOBALS['O']['_up'] ?? sys_get_temp_dir()]; } function wp_mkdir_p($d) { return mkdir($d, 0777, true); }
+function sanitize_key($k) { return preg_replace('/[^a-z0-9_\\-]/', '', strtolower((string)$k)); }
 function sanitize_text_field($s) { return trim(strip_tags((string)$s)); }
 function is_wp_error() { return false; } function wp_remote_retrieve_body($r) { return json_encode($r['b']); }
 class WPDB_Mock {
@@ -55,5 +56,5 @@ if ($cmd === 'api') { accsoft_wl_api($_REQUEST['action'] ?? '', $arg['post'] ?? 
 if ($cmd === 'pay') { $_SERVER['REQUEST_METHOD'] = $arg['method'] ?? 'GET'; accsoft_wl_pay(); }
 if ($cmd === 'import') { echo json_encode(accsoft_wl_import($arg['data'])); }
 if ($cmd === 'sql') { echo json_encode($wpdb->get_results($arg['q'])); }
-if ($cmd === 'ingest') { try { echo json_encode(accsoft_wl_ingest($arg['zip'], $arg['changelog'] ?? '')); } catch (Exception $e) { echo json_encode(['error' => $e->getMessage()]); } }
+if ($cmd === 'ingest') { try { $o = $arg['o'] ?? []; if (isset($o['plans_text'])) $o['plans'] = accsoft_wl_parse_plans($o['plans_text']); $r = accsoft_wl_ingest($arg['zip'], $arg['changelog'] ?? '', $o); echo json_encode($r) ?: json_last_error_msg(); } catch (Exception $e) { echo json_encode(['error' => $e->getMessage()]); } }
 if ($cmd === 'dl') { accsoft_wl_serve_download(); }

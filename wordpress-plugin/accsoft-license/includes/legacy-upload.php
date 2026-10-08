@@ -34,21 +34,62 @@ function accsoft_wl_zip_meta($path) {
             'requires' => $h('Requires at least') ?: '5.8', 'tested' => $h('Tested up to') ?: '6.6', 'php' => $h('Requires PHP') ?: '7.4'];
 }
 
+/** موتور لایسنس را در فایل اصلی افزونه تزریق می‌کند (بعد از هدر و declare/namespace). → کد جدید */
+function accsoft_wl_inject_source($src, $slug, $version, $gate) {
+    if (strpos($src, 'WB_License_Client') !== false) return null;                       // خود افزونه موتور را دارد
+    $p = stripos($src, 'Plugin Name'); $e = $p === false ? false : strpos($src, '*/', $p);
+    if ($e === false) throw new Exception('هدر افزونه باید داخل کامنت /* ... */ باشد تا موتور لایسنس اضافه شود');
+    $pos = $e + 2; $rest = substr($src, $pos);
+    if (preg_match('/^\s*namespace\b[^;{]*\{/', $rest)) throw new Exception('namespace با آکولاد پشتیبانی نمی‌شود؛ از «namespace X;» استفاده کنید');
+    if (preg_match('/^\s*(declare\s*\([^)]*\)\s*;\s*)*(namespace\s+[A-Za-z0-9_\\\\]+\s*;\s*)?/', $rest, $m)) $pos += strlen($m[0]);
+    $g = '$GLOBALS[' . var_export('wb_lic_' . str_replace('-', '_', $slug), true) . ']';
+    $cfg = var_export(['product' => $slug, 'api' => home_url('/license-server/api/'), 'buy_url' => home_url('/license-server/pay/?plugin=' . $slug), 'version' => $version], true);
+    $code = "\n/* موتور لایسنس — به‌صورت خودکار توسط سرور لایسنس اضافه شده است */\nrequire_once __DIR__ . '/wb-license-client.php';\n"
+          . $g . " = new \\WB_License_Client(" . substr($cfg, 0, -1) . "  'file' => __FILE__,\n));\n"
+          . ($gate ? "if ( ! " . $g . "->is_active() ) { return; }\n" : '');
+    return substr($src, 0, $pos) . $code . substr($src, $pos);
+}
+
+/** zip توزیعی: همان zip + فایل کلاینت + تزریق در فایل اصلی. اگر ممکن نباشد Exception */
+function accsoft_wl_build_dist($tmp, $m, $dest, $gate) {
+    $client = ACCSOFT_DIR . 'sdk/wb-license-client.php'; if (!is_readable($client)) throw new Exception('فایل sdk/wb-license-client.php در افزونهٔ سرور نیست');
+    if (!copy($tmp, $dest)) throw new Exception('ذخیرهٔ فایل ممکن نشد');
+    $z = new ZipArchive(); if ($z->open($dest) !== true) throw new Exception('zip قابل باز شدن نیست');
+    $src = $z->getFromName($m['file']); $new = accsoft_wl_inject_source($src, $m['slug'], $m['version'], $gate);
+    if ($new !== null) { $z->addFromString($m['file'], $new); $z->addFromString($m['slug'] . '/wb-license-client.php', file_get_contents($client)); }
+    $z->close(); return $new !== null;
+}
+
+/** «id|عنوان|ماه(۰=دائمی)|قیمت تومان» در هر خط → پلن‌ها (قیمت ریال) */
+function accsoft_wl_parse_plans($text) {
+    $out = [];
+    foreach (explode("\n", str_replace("\r", '', (string)$text)) as $ln) {
+        $ln = trim($ln); if ($ln === '') continue; $c = array_map('trim', explode('|', $ln));
+        $id = sanitize_key($c[0] ?? ''); if (count($c) < 4 || $id === '' || !ctype_digit($c[2]) || !ctype_digit(str_replace(',', '', $c[3]))) throw new Exception('قالب پلن نامعتبر: ' . $ln);
+        $out[$id] = ['months' => (int)$c[2], 'price' => (int)str_replace(',', '', $c[3]) * 10, 'label' => sanitize_text_field($c[1]), 'hint' => '', 'badge' => ''];
+    }
+    return $out;
+}
+
 /** ثبت/به‌روزرسانی محصول از روی zip آپلودشده. محصول موجود: قیمت/پلن‌ها حفظ و فقط نسخه عوض می‌شود. */
-function accsoft_wl_ingest($tmp, $changelog = '') {
+function accsoft_wl_ingest($tmp, $changelog = '', $o = []) {
+    $o += ['inject' => true, 'gate' => true, 'plans' => []];
     $m = accsoft_wl_zip_meta($tmp); $prods = accsoft_wl_products(); $cur = $prods[$m['slug']] ?? null;
     if ($cur && !empty($cur['update']['version']) && empty($cur['update']['file']) && !empty($cur['update']['package'])) { /* محصول قدیمی با لینک بیرونی؛ با آپلود، به فایل داخلی تبدیل می‌شود */ }
     if ($cur && !empty($cur['update']['version']) && version_compare($m['version'], $cur['update']['version'], '<'))
         throw new Exception("نسخهٔ {$m['version']} از نسخهٔ فعلی ({$cur['update']['version']}) قدیمی‌تر است");
     $dir = accsoft_wl_store_dir(); $fn = $m['slug'] . '-' . preg_replace('/[^0-9A-Za-z._-]/', '', $m['version']) . '-' . bin2hex(random_bytes(6)) . '.zip';
-    if (!copy($tmp, $dir . '/' . $fn)) throw new Exception('ذخیرهٔ فایل ممکن نشد');
+    $injected = false;
+    if ($o['inject']) $injected = accsoft_wl_build_dist($tmp, $m, $dir . '/' . $fn, (bool)$o['gate']);
+    elseif (!copy($tmp, $dir . '/' . $fn)) throw new Exception('ذخیرهٔ فایل ممکن نشد');
     if (!empty($cur['update']['file']) && $cur['update']['file'] !== $fn) { /* نسخهٔ قبلی برای بازگشت نگه داشته می‌شود */ $hist = $cur['history'] ?? []; array_unshift($hist, $cur['update']['file']); $cur['history'] = array_slice($hist, 0, 3); }
-    $prods[$m['slug']] = array_merge($cur ?: ['label' => $m['name'], 'icon' => '🔌', 'desc' => $m['desc'], 'price' => 0, 'plans' => []], [
+    if ($o['plans']) { if ($cur) $cur['plans'] = $o['plans']; }
+    $prods[$m['slug']] = array_merge($cur ?: ['label' => $m['name'], 'icon' => '🔌', 'desc' => $m['desc'], 'price' => 0, 'plans' => $o['plans']], [
         'label' => $cur['label'] ?? $m['name'], 'desc' => ($cur['desc'] ?? '') ?: $m['desc'],
         'update' => ['version' => $m['version'], 'package' => '', 'file' => $fn, 'requires' => $m['requires'], 'tested' => $m['tested'], 'requires_php' => $m['php'],
                      'changelog' => $changelog !== '' ? $changelog : 'نسخهٔ ' . $m['version']]]);
     update_option('accsoft_wl_products', $prods, false);
-    return $m + ['created' => !$cur, 'file' => $fn];
+    return $m + ['created' => !$cur, 'file' => $fn, 'injected' => $injected];
 }
 
 /** آدرس دانلود امن؛ فقط وقتی لایسنس و دامنه موجود باشد */
@@ -70,16 +111,21 @@ add_action('template_redirect', function () { if (!empty($_GET['accsoft_dl'])) a
 add_action('admin_post_accsoft_wl_upload', function () {
     accsoft_admin_guard('accsoft_wl_upload'); $f = $_FILES['f'] ?? null;
     if (!$f || $f['error'] || !is_uploaded_file($f['tmp_name']) || $f['size'] > 100 * 1024 * 1024) accsoft_admin_back('legacy&sub=upload', 'فایل نامعتبر یا بزرگ‌تر از ۱۰۰ مگابایت', true);
-    try { $r = accsoft_wl_ingest($f['tmp_name'], sanitize_text_field($_POST['changelog'] ?? '')); }
+    try { $r = accsoft_wl_ingest($f['tmp_name'], sanitize_text_field($_POST['changelog'] ?? ''), ['inject' => !empty($_POST['inject']), 'gate' => !empty($_POST['gate']), 'plans' => accsoft_wl_parse_plans(wp_unslash($_POST['plans'] ?? ''))]); }
     catch (Exception $e) { accsoft_admin_back('legacy&sub=upload', $e->getMessage(), true); }
-    accsoft_admin_back('legacy&sub=upload', ($r['created'] ? 'محصول جدید ثبت شد: ' : 'نسخهٔ جدید منتشر شد: ') . $r['name'] . ' ' . $r['version'] . ($r['created'] ? ' — قیمت/پلن را در «محصولات و قیمت» تنظیم کنید' : ''));
+    accsoft_admin_back('legacy&sub=upload', ($r['created'] ? 'محصول جدید ثبت شد: ' : 'نسخهٔ جدید منتشر شد: ') . $r['name'] . ' ' . $r['version'] . ($r['injected'] ? ' — موتور لایسنس به افزونه اضافه شد' : '') . ($r['created'] && !accsoft_wl_product($r['slug'])['plans'] ? ' — پلن/قیمت را در «محصولات و قیمت» تنظیم کنید' : ''));
 });
 
 function accsoft_wl_upload_page() {
     echo '<h3>آپلود افزونه از سیستم</h3><p>فایل zip افزونه را انتخاب کنید (پوشهٔ افزونه در ریشهٔ zip و فایل اصلی با هدر <code>Plugin Name</code> و <code>Version</code>). نام پوشه همان شناسهٔ محصول می‌شود.
       اگر محصول تازه باشد ثبت می‌شود؛ اگر موجود باشد نسخهٔ جدید منتشر و مشتری‌های دارای لایسنس در وردپرس خودشان «به‌روزرسانی» می‌بینند.</p>
       <form method="post" enctype="multipart/form-data" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="accsoft_wl_upload">' . wp_nonce_field('accsoft_wl_upload', '_n', true, false) . '
-      <input type="file" name="f" accept=".zip" required> <input name="changelog" placeholder="توضیح تغییرات (اختیاری)" style="width:320px"> <button class="button button-primary">آپلود و انتشار</button></form>';
+      <input type="file" name="f" accept=".zip" required> <input name="changelog" placeholder="توضیح تغییرات (اختیاری)" style="width:320px"><br>
+      <label><input type="checkbox" name="inject" value="1" checked> موتور لایسنس خودکار به افزونه اضافه شود (صفحهٔ وارد کردن کلید، بررسی لایسنس، به‌روزرسانی)</label><br>
+      <label><input type="checkbox" name="gate" value="1" checked> بدون لایسنس معتبر، افزونه کار نکند (فقط صفحهٔ لایسنس باشد)</label><br>
+      <p>پلن‌ها (هر خط: <code>شناسه|عنوان|ماه (۰=دائمی)|قیمت به تومان</code>؛ فقط برای محصول جدید یا برای جایگزینی پلن‌ها):</p>
+      <textarea name="plans" rows="4" style="width:520px;direction:ltr" placeholder="m1|ماهانه|1|150000&#10;m12|سالانه|12|1200000&#10;life|دائمی|0|2500000"></textarea><br>
+      <button class="button button-primary">آپلود و انتشار</button></form>';
     echo '<h3>محصولات</h3><table class="widefat striped"><tr><th>شناسه</th><th>نام</th><th>نسخه</th><th>فایل</th><th>قیمت (تومان)</th></tr>';
     foreach (accsoft_wl_products() as $s => $p) echo '<tr><td dir="ltr">' . esc_html($s) . '</td><td>' . esc_html($p['label'] ?? '') . '</td><td>' . esc_html($p['update']['version'] ?? '—') . '</td><td>' . (!empty($p['update']['file']) ? '✔ آپلودشده' : (!empty($p['update']['package']) ? 'لینک بیرونی' : '—')) . '</td><td>' . ($p['plans'] ? 'پلنی' : number_format_i18n(($p['price'] ?? 0) / 10)) . '</td></tr>';
     echo '</table>';
