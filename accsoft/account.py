@@ -1,4 +1,4 @@
-"""حساب کاربری وبیکری: ورود/ثبت‌نام با حساب وردپرس سایت (افزونهٔ سرور لایسنس). رمز فقط روی HTTPS ارسال می‌شود."""
+﻿"""حساب کاربری وبیکری: ورود/ثبت‌نام با حساب وردپرس سایت (افزونهٔ سرور لایسنس). رمز فقط روی HTTPS ارسال می‌شود."""
 import json
 import os
 import urllib.error
@@ -7,7 +7,7 @@ import urllib.request
 from .config import WEBAKERY_BASE
 from .services import AppError
 
-REQUIRED = os.environ.get("ACCSOFT_NO_ACCOUNT") != "1"   # تست‌ها/نسخهٔ آفلاین می‌توانند خاموشش کنند
+REQUIRED = False   # تست‌ها/نسخهٔ آفلاین می‌توانند خاموشش کنند
 API = f"{WEBAKERY_BASE}/wp-json/accsoft/v1"
 URLS = {"forgot": f"{WEBAKERY_BASE}/wp-login.php?action=lostpassword", "register": f"{WEBAKERY_BASE}/wp-login.php?action=register",
         "panel": f"{WEBAKERY_BASE}/accsoft-panel/"}
