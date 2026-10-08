@@ -580,3 +580,5 @@ async function pLicense(el) {
 }
 
 boot();
+
+setTimeout(async () => { const upd = await api('GET', '/api/check-update').catch(() => ({})); if(upd && upd.has_update) { const bar = document.createElement('div'); bar.className='banner ok'; bar.innerHTML = '<div style="display:flex;justify-content:space-between;width:100%;align-items:center"><div><b>نسخه جدید برنامه (نسخه ' + upd.version + ') منتشر شده است!</b> برای دریافت کلیک کنید.</div><button class="ok" onclick="api(''POST'', ''/api/open-url'', {url: '''+upd.url+'''})">دانلود مستقیم</button></div>'; document.body.insertBefore(bar, document.body.firstChild); } }, 3000);

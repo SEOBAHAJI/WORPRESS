@@ -42,6 +42,18 @@ class App:
         r, db = self.route, self.db
 
         @r("GET", "/api/state", public=True)
+        @r("GET", "/api/check-update", public=True)
+        def check_update(c):
+            try:
+                import urllib.request, json
+                with urllib.request.urlopen(f"{WEBAKERY_BASE}/wp-json/accsoft/v1/version", timeout=5) as resp:
+                    remote = json.loads(resp.read())
+                    if remote.get("version") and remote["version"] != __version__:
+                        return {"has_update": True, "version": remote["version"], "url": remote.get("url", WEBAKERY_BASE)}
+            except Exception:
+                pass
+            return {"has_update": False}
+
         def state(c):
             lic = licensing.status(db)
             user = self._user(c.session)
@@ -123,7 +135,7 @@ class App:
         @r("POST", "/api/open-url", public=True)
         def open_url(c):
             import webbrowser
-            url = account.URLS.get(c.body.get("to") or "")
+            url = c.body.get("url") or account.URLS.get(c.body.get("to") or "")
             if not url:
                 raise AppError("آدرس نامعتبر")
             threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
