@@ -19,6 +19,7 @@ require_once ACCSOFT_DIR . 'includes/portal.php';
 require_once ACCSOFT_DIR . 'includes/admin.php';
 require_once ACCSOFT_DIR . 'includes/legacy.php';
 require_once ACCSOFT_DIR . 'includes/legacy-admin.php';
+require_once ACCSOFT_DIR . 'includes/legacy-upload.php';
 
 register_activation_hook(__FILE__, 'accsoft_activate');
 add_action('plugins_loaded', function () {

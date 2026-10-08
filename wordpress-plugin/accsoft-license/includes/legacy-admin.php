@@ -49,7 +49,7 @@ add_action('admin_init', function () {
 
 function accsoft_wl_admin_page($sub) {
     global $wpdb; $L = accsoft_t('wlic'); $A = accsoft_t('wact');
-    $subs = ['lic' => 'لایسنس‌ها', 'prod' => 'محصولات و قیمت', 'pay' => 'پرداخت‌ها', 'coupon' => 'کد تخفیف', 'set' => 'تنظیمات و درون‌ریزی'];
+    $subs = ['lic' => 'لایسنس‌ها', 'upload' => '⬆ آپلود افزونه', 'prod' => 'محصولات و قیمت', 'pay' => 'پرداخت‌ها', 'coupon' => 'کد تخفیف', 'set' => 'تنظیمات و درون‌ریزی'];
     echo '<p>';
     foreach ($subs as $k => $t) echo '<a class="button' . ($sub === $k ? ' button-primary' : '') . '" href="' . esc_url(admin_url('admin.php?page=accsoft&tab=legacy&sub=' . $k)) . '">' . esc_html($t) . '</a> ';
     echo '</p>';
@@ -74,6 +74,8 @@ function accsoft_wl_admin_page($sub) {
         }
         echo '</table>';
     }
+
+    if ($sub === 'upload') accsoft_wl_upload_page();
 
     if ($sub === 'prod') {
         echo '<p>قیمت‌ها به <b>تومان</b> وارد می‌شوند (داخلی ریال ذخیره می‌شود). برای حذف پلن، شناسه‌اش را خالی کنید. افزودن محصول جدید: ردیف خالی انتهای صفحه.</p>';

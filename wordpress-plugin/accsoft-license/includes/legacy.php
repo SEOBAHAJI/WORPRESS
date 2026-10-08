@@ -145,6 +145,7 @@ function accsoft_wl_update_payload($product, $client_ver, $key, $domain) {
         }
     }
     $u = $p['update']; $home = $u['homepage'] ?? accsoft_setting('wl_base', 'https://webakery.ir'); $pkg = $u['package'] ?? '';
+    if (!empty($u['file'])) $pkg = $key !== '' && $domain !== '' ? accsoft_wl_download_url($product, $key, $domain) : '';
     return ['success' => true, 'message' => 'اطلاعات به‌روزرسانی', 'product' => $product, 'version' => $u['version'], 'package' => $pkg, 'download_url' => $pkg,
         'url' => $home, 'homepage' => $home, 'requires' => $u['requires'] ?? '5.8', 'tested' => $u['tested'] ?? '6.6', 'requires_php' => $u['requires_php'] ?? '7.4',
         'changelog' => $u['changelog'] ?? '', 'name' => $p['label'] ?? $product, 'client_version' => $client_ver,

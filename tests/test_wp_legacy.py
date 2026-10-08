@@ -89,3 +89,55 @@ class Legacy(unittest.TestCase):
         self.run_php("pay", {"opts": opts, "get": {"plugin": "webakery-chat", "zibal_cb": "1", "trackId": "777001", "success": "1"}})
         exp = json.loads(self.run_php("sql", {"q": "SELECT expires_at FROM wp_accsoft_wlic"}))[0]["expires_at"]
         self.assertEqual(exp, "2099-04-15")   # از انقضای فعلی ۳ ماه اضافه شد
+
+
+@unittest.skipUnless(PHP, "php نصب نیست")
+class Upload(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.db = str(self.tmp / "t.db")
+        (self.tmp / "up").mkdir()
+        self.opts = {"_up": str(self.tmp / "up"), "accsoft_settings": {"zibal_merchant": "z"}}
+
+    def php(self, cmd, arg):
+        r = subprocess.run([PHP, H, self.db, cmd, json.dumps(arg)], capture_output=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.decode("utf-8", "replace")
+
+    def mkzip(self, name, files):
+        import zipfile
+        p = self.tmp / name
+        with zipfile.ZipFile(p, "w") as z:
+            for n, c in files.items():
+                z.writestr(n, c)
+        return str(p)
+
+    PLUG = "<?php\n/**\n * Plugin Name: My Plugin\n * Description: test desc\n * Version: %s\n * Requires PHP: 7.4\n */\n"
+
+    def test_upload_registers_product_and_secure_update(self):
+        z = self.mkzip("a.zip", {"my-plugin/my-plugin.php": self.PLUG % "1.2.0", "my-plugin/inc/x.php": "<?php"})
+        r = json.loads(self.php("ingest", {"zip": z, "opts": self.opts, "changelog": "اولین"}))
+        self.assertEqual((r["slug"], r["version"], r["created"]), ("my-plugin", "1.2.0", True))
+        # لایسنس بساز و فعال کن
+        self.php("import", {"opts": self.opts, "data": {"licenses": [{"license_key": "MYPLUG-AAAA-BBBB-CCCC-DDDD", "email": "a@b.ir", "product": "my-plugin", "status": "active"}],
+                                                      "activations": [{"license_key": "MYPLUG-AAAA-BBBB-CCCC-DDDD", "domain": "shop.ir"}]}})
+        q = {"opts": self.opts, "get": {"action": "update", "product": "my-plugin", "version": "1.0.0", "license_key": "MYPLUG-AAAA-BBBB-CCCC-DDDD", "domain": "shop.ir"}}
+        u = json.loads(self.php("api", q))
+        self.assertTrue(u["success"] and u["update_available"] and "accsoft_dl=my-plugin" in u["package"])
+        nolic = json.loads(self.php("api", {"opts": self.opts, "get": {"action": "update", "product": "my-plugin", "version": "1.0.0"}}))
+        self.assertEqual(nolic["package"], "")        # بدون لایسنس لینکی داده نمی‌شود
+        ok = self.php("dl", {"opts": self.opts, "get": {"accsoft_dl": "my-plugin", "license_key": "MYPLUG-AAAA-BBBB-CCCC-DDDD", "domain": "shop.ir"}})
+        self.assertTrue(ok.startswith("PK"))          # zip واقعی
+        bad = self.php("dl", {"opts": self.opts, "get": {"accsoft_dl": "my-plugin", "license_key": "MYPLUG-AAAA-BBBB-CCCC-DDDD", "domain": "evil.ir"}})
+        self.assertEqual(bad, "Invalid license")
+        # نسخهٔ جدید → به‌روزرسانی؛ نسخهٔ قدیمی‌تر رد
+        z2 = self.mkzip("b.zip", {"my-plugin/my-plugin.php": self.PLUG % "1.3.0"})
+        r2 = json.loads(self.php("ingest", {"zip": z2, "opts": self.opts}))
+        self.assertEqual((r2["version"], r2["created"]), ("1.3.0", False))
+        z3 = self.mkzip("c.zip", {"my-plugin/my-plugin.php": self.PLUG % "1.0.0"})
+        self.assertIn("قدیمی", json.loads(self.php("ingest", {"zip": z3, "opts": self.opts}))["error"])
+
+    def test_bad_zips_rejected(self):
+        for files in ({"../evil.php": "x"}, {"a/a.php": "<?php // no header", }, {"a/a.php": self.PLUG % "1", "b/b.php": "x"}, {"a/a.php": "<?php\n/* Plugin Name: X */"}):
+            r = json.loads(self.php("ingest", {"zip": self.mkzip("x.zip", files), "opts": self.opts}))
+            self.assertIn("error", r, files)

@@ -23,6 +23,8 @@ function wp_remote_post($url, $a) {
     if (str_ends_with($url, '/request')) return ['b' => ['result' => 100, 'trackId' => 777001]];
     return ['b' => ['result' => 100, 'amount' => $GLOBALS['O']['zibal_amount'] ?? 0]];
 }
+function wp_upload_dir() { return ['basedir' => $GLOBALS['O']['_up'] ?? sys_get_temp_dir()]; } function wp_mkdir_p($d) { return mkdir($d, 0777, true); }
+function sanitize_text_field($s) { return trim(strip_tags((string)$s)); }
 function is_wp_error() { return false; } function wp_remote_retrieve_body($r) { return json_encode($r['b']); }
 class WPDB_Mock {
     public $prefix = 'wp_', $insert_id = 0; private $p;
@@ -46,10 +48,12 @@ class WPDB_Mock {
     function esc_like($s) { return addcslashes($s, '_%\\'); }
 }
 $wpdb = new WPDB_Mock($dbfile);
-require ACCSOFT_DIR . 'includes/crypto.php'; require ACCSOFT_DIR . 'includes/store.php'; require ACCSOFT_DIR . 'includes/legacy.php'; require ACCSOFT_DIR . 'includes/legacy-admin.php';
+require ACCSOFT_DIR . 'includes/crypto.php'; require ACCSOFT_DIR . 'includes/store.php'; require ACCSOFT_DIR . 'includes/legacy.php'; require ACCSOFT_DIR . 'includes/legacy-admin.php'; require ACCSOFT_DIR . 'includes/legacy-upload.php';
 $_GET = $arg['get'] ?? []; $_POST = $arg['post'] ?? []; $_REQUEST = array_merge($_GET, $_POST);
 if (isset($arg['opts'])) foreach ($arg['opts'] as $k => $v) $GLOBALS['O'][$k] = $v;
 if ($cmd === 'api') { accsoft_wl_api($_REQUEST['action'] ?? '', $arg['post'] ?? []); }
 if ($cmd === 'pay') { $_SERVER['REQUEST_METHOD'] = $arg['method'] ?? 'GET'; accsoft_wl_pay(); }
 if ($cmd === 'import') { echo json_encode(accsoft_wl_import($arg['data'])); }
 if ($cmd === 'sql') { echo json_encode($wpdb->get_results($arg['q'])); }
+if ($cmd === 'ingest') { try { echo json_encode(accsoft_wl_ingest($arg['zip'], $arg['changelog'] ?? '')); } catch (Exception $e) { echo json_encode(['error' => $e->getMessage()]); } }
+if ($cmd === 'dl') { accsoft_wl_serve_download(); }
