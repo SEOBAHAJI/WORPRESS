@@ -7,10 +7,24 @@ import unittest
 from pathlib import Path
 
 PHP = shutil.which("php")
+
+
+def _php_ok():
+    """php با pdo_sqlite و zip لازم است (در بعضی محیط‌ها مثل ویندوز CI نیست → تست‌ها نادیده گرفته می‌شوند)."""
+    if not PHP:
+        return False
+    try:
+        mods = subprocess.run([PHP, "-m"], capture_output=True, text=True, timeout=30).stdout.lower()
+    except Exception:
+        return False
+    return "pdo_sqlite" in mods and "zip" in mods
+
+
+PHP_OK = _php_ok()
 H = str(Path(__file__).parent / "php" / "harness.php")
 
 
-@unittest.skipUnless(PHP, "php نصب نیست")
+@unittest.skipUnless(PHP_OK, "php با pdo_sqlite و zip نیست")
 class Legacy(unittest.TestCase):
     def setUp(self):
         self.db = str(Path(tempfile.mkdtemp()) / "t.db")
@@ -91,7 +105,7 @@ class Legacy(unittest.TestCase):
         self.assertEqual(exp, "2099-04-15")   # از انقضای فعلی ۳ ماه اضافه شد
 
 
-@unittest.skipUnless(PHP, "php نصب نیست")
+@unittest.skipUnless(PHP_OK, "php با pdo_sqlite و zip نیست")
 class Upload(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
